@@ -8,6 +8,7 @@ __pycache__/
 *.pyc
 .venv/
 .env
+рендер
 ключи апи
 .idea/
 _vendor/

@@ -1,67 +1,58 @@
-# Хори Кёко — 3D ИИ-помощник и Telegram бот
+# Хори Кёко — 3D ИИ-помощник
 
-## Локальный запуск (Windows)
+## Локальный запуск
 
 ```bash
-# 1. Активировать venv
-.venv\Scripts\activate
-
-# 2. Установить зависимости
-pip install -r requirements.txt
-
-# 3. Запустить Xray прокси (для Groq/Gemini из РФ)
-#    Уже настроен в xray/ — запускается автоматически через ai_module.py
-
-# 4. Запустить бота
-python telegram_bot.py
-
-# 5. Запустить 3D модель
-python model_viewer.py
+npm install
+npm run dev
 ```
 
-## Деплой на Render.com (бот работает 24/7)
+## Деплой на Render.com
 
 1. Зарегистрируйся на [render.com](https://render.com)
 2. Создай новый **Web Service** → выбери GitHub репозиторий
-3. Render автоматически использует `render.yaml`
-4. Добавь переменные окружения:
-   - `BOT_TOKEN` — токен от @BotFather
-   - `GROQ_API_KEY` — ключ Groq
-   - `GEMINI_API_KEY` — ключ Gemini
-   - `OPENROUTER_API_KEY` — ключ OpenRouter
+3. Render использует `render.yaml` из репозитория
+4. Добавь `GEMINI_API_KEY`, если нужны ответы Gemini
 5. Нажми **Deploy**
 
-### Чтобы бот не засыпал на бесплатном тарифе Render:
+Сервис обязан запускаться командой `npm start` и слушать порт, который Render передает в переменной `PORT`.
+
+### Настройка UptimeRobot
+
+Для проверки доступности создай HTTP(s)-монитор с URL:
+
+```text
+https://<имя-сервиса>.onrender.com/api/health
+```
+
+Ожидаемый ответ: JSON со статусом `ok`. Пинговать локальный `localhost` или URL из dev container бесполезно: UptimeRobot должен обращаться к публичному адресу Render.
+
+На бесплатном тарифе Render может засыпать после периода бездействия. Внешний мониторинг иногда уменьшает такие простои, но не является гарантией работы 24/7; для постоянной работы нужен платный план.
+
+### Почему локальные программы не помогали
+
+Скрипт, запущенный на компьютере, не удерживает процесс Render и не заменяет внешний HTTP-монитор. Кроме того, до исправления порта запросы Render попадали на порт `PORT`, а приложение слушало только `3000`, поэтому health-check не проходил.
+
+Для ручной проверки:
+
+```bash
+curl https://<имя-сервиса>.onrender.com/api/health
+```
+
+### Чтобы сервис не засыпал на бесплатном тарифе:
 1. Зарегистрируйся на [UptimeRobot](https://uptimerobot.com)
-2. Добавь монитор: HTTP(s) → вставь URL твоего Render-сервиса
-3. UptimeRobot будет пинговать каждые 5 минут → бот не засыпает
+2. Добавь монитор: HTTP(s) → укажи URL `/api/health`
+3. Проверь, что монитор получает HTTP `200`
 
 ## Файлы
 
 | Файл | Описание |
 |------|----------|
-| `telegram_bot.py` | Telegram бот с ИИ, памятью, дневником |
-| `ai_module.py` | Единый ИИ-модуль (Groq, Gemini, OpenRouter, xAI) |
-| `model_viewer.py` | 3D просмотрщик (PyQt6 + Three.js) |
+| `server.ts` | Express API и production-сервер приложения |
+| `src/` | React-интерфейс и 3D просмотрщик |
 | `hori_memory.json` | Память о пользователе (факты, диалоги) |
 | `hori_personality.json` | Личность Хори (саморазвивающаяся) |
 | `hori_diary.json` | Личный дневник Хори |
 | `hori_knowledge.json` | Факты о Хори и мире Horimiya |
 | `hori_photos/` | Оригинальные изображения Хори по настроению |
-| `safety.py` | Фильтрация входных и выходных сообщений, определение эмоций |
-
-### Более точная генерация фото
-
-Для максимального сходства можно подключить Automatic1111/Forge:
-
-- `SD_WEBUI_URL` — адрес WebUI API, например `http://127.0.0.1:7860`;
-- `SD_MODEL_CHECKPOINT` — checkpoint Stable Diffusion;
-- `HORI_LORA_TRIGGER` — trigger word установленной LoRA Хори;
-- `HORI_REFERENCE_IMAGE` — путь к разрешённому эталонному изображению для img2img;
-- `SD_DENOISING` — обычно `0.25-0.4`, чтобы сохранять внешность эталона.
-
-Если `SD_WEBUI_URL` не задан, бот использует автономную облачную генерацию оригинальной иллюстрации по описанию Хори.
-Разрешённые готовые изображения можно подключить через `HORI_APPROVED_PHOTOS_DIR`.
-| `xray/` | Xray-core прокси (VLESS, для РФ) |
 | `render.yaml` | Конфиг деплоя на Render |
-| `requirements.txt` | Python зависимости |
