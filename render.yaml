@@ -9,5 +9,21 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: OFFLINE_MODE
+        value: 'false'
+      - key: BOT_TOKEN
+        sync: false
       - key: GEMINI_API_KEY
         sync: false
+      - key: KIE_API_KEY
+        sync: false
+      - key: KIE_BASE_URL
+        value: https://api.kie.ai/v1
+      - key: KIE_MODEL
+        value: gpt-4o-mini
+      - key: OLLAMA_BASE_URL
+        value: https://ollama.com/v1
+      - key: OLLAMA_API_KEY
+        sync: false
+      - key: OLLAMA_MODEL
+        value: gemma4:31b

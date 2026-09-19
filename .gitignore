@@ -8,8 +8,15 @@ __pycache__/
 *.pyc
 .venv/
 .env
+.env.*
+!.env.example
 рендер
 ключи апи
+ключ
+ключ*
+uptimerobot_public_key.txt
+*.pem
+*.key
 .idea/
 _vendor/
 *.glb
