@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: hori-kyoko
+    name: telegramxor
     runtime: node
     plan: free
     buildCommand: npm ci && npm run build
