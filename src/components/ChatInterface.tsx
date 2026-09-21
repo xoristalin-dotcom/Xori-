@@ -22,6 +22,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [inputText, setInputText] = useState('');
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastSpokenMessageId = useRef<string | null>(null);
 
   // Auto-scroll
   useEffect(() => {
@@ -47,6 +48,13 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
     window.speechSynthesis.speak(utterance);
   };
+
+  useEffect(() => {
+    const latestMessage = messages[messages.length - 1];
+    if (!latestMessage || latestMessage.sender !== 'hori' || latestMessage.id === lastSpokenMessageId.current) return;
+    lastSpokenMessageId.current = latestMessage.id;
+    speakText(latestMessage.text);
+  }, [messages]);
 
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();

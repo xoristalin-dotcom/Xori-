@@ -102,6 +102,9 @@ export const App: React.FC = () => {
       });
 
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'API-провайдеры недоступны');
+      }
 
       const horiMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
@@ -136,7 +139,9 @@ export const App: React.FC = () => {
       const errorMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         sender: 'hori',
-        text: 'Ой, что-то пошло не так со связью... Но я здесь с тобой!',
+        text: err instanceof Error
+          ? `Не могу ответить через API: ${err.message}`
+          : 'Не могу ответить через API: провайдеры недоступны.',
         time: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
         emotion: 'thinking',
       };

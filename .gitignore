@@ -31,5 +31,6 @@ _test_*.py
 _check_*.py
 _download_*.py
 _uptime_*.py
+hori_training.json
 
 как должна работать модель

@@ -5,6 +5,14 @@
   "conversations": [],
   "mood": "спокойное",
   "emotion": "calm",
-  "last_interaction": null,
-  "proactive_sent": []
+  "last_interaction": "2026-09-21T14:38:34.047Z",
+  "proactive_sent": [],
+  "current_topics": [],
+  "inner_thoughts": [],
+  "reflection_log": [],
+  "energy": 72,
+  "last_proactive_message": null,
+  "last_chat_id": null,
+  "last_diary_update": "2026-09-20T01:40:47.807Z",
+  "last_night_journal": "2026-09-20T01:40:47.807Z"
 }

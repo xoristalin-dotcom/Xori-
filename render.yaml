@@ -15,15 +15,25 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_MODEL
+        value: openrouter/free
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.1-8b-instant
       - key: KIE_API_KEY
         sync: false
       - key: KIE_BASE_URL
         value: https://api.kie.ai/v1
       - key: KIE_MODEL
         value: gpt-4o-mini
-      - key: OLLAMA_BASE_URL
-        value: https://ollama.com/v1
-      - key: OLLAMA_API_KEY
+      - key: OPENAI_API_KEY
         sync: false
-      - key: OLLAMA_MODEL
-        value: gemma4:31b
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: TELEGRAM_VOICE_URL
+        sync: false
+      - key: TELEGRAM_PHOTO_URL
+        sync: false
