@@ -1,4 +1,4 @@
-import 'dotenv/config';
+Import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import path from 'path';
 import os from 'os';
@@ -1484,18 +1484,59 @@ async function maybeSendProactiveTelegramMessage() {
     last_interaction: new Date().toISOString(),
     proactive_sent: [],
     last_chat_id: null,
+    next_proactive_at: null,
+    last_proactive_message: null,
   }));
 
-  const lastInteraction = memory.last_interaction ? new Date(memory.last_interaction).getTime() : Date.now();
   const now = Date.now();
-  const hoursSince = (now - lastInteraction) / (1000 * 60 * 60);
-  const lastProactive = memory.last_proactive_message ? new Date(memory.last_proactive_message).getTime() : 0;
 
-  if (hoursSince < 4 || now - lastProactive < 1000 * 60 * 60 * 6) return;
+  const lastInteraction = memory.last_interaction
+    ? new Date(memory.last_interaction).getTime()
+    : now;
+
+  const lastProactive = memory.last_proactive_message
+    ? new Date(memory.last_proactive_message).getTime()
+    : 0;
+
+  // Не писать чаще одного раза в 6 часов
+  if (
+    lastProactive &&
+    now - lastProactive < 6 * 60 * 60 * 1000
+  ) {
+    return;
+  }
+
   if (!memory.last_chat_id) return;
 
-  const proactiveText = await generateTextWithConfiguredProvider(buildSystemPrompt(), buildProactiveMessage(memory), []);
-  const finalText = proactiveText || buildProactiveMessage(memory);
+  // Хори сама выбирает время ожидания: 4–12 часов
+  if (!memory.next_proactive_at) {
+    const delay =
+      4 * 60 * 60 * 1000 +
+      Math.random() * (8 * 60 * 60 * 1000);
+
+    memory.next_proactive_at = new Date(
+      lastInteraction + delay
+    ).toISOString();
+
+    saveJson(MEMORY_PATH, memory);
+    return;
+  }
+
+  const nextTime = new Date(
+    memory.next_proactive_at
+  ).getTime();
+
+  if (now < nextTime) return;
+
+  const proactiveText =
+    await generateTextWithConfiguredProvider(
+      buildSystemPrompt(),
+      buildProactiveMessage(memory),
+      []
+    );
+
+  const finalText =
+    proactiveText || buildProactiveMessage(memory);
 
   try {
     await telegramRequest('sendMessage', {
@@ -1503,14 +1544,33 @@ async function maybeSendProactiveTelegramMessage() {
       text: finalText,
     });
 
-    memory.last_proactive_message = new Date().toISOString();
+    memory.last_proactive_message =
+      new Date().toISOString();
+
+    memory.next_proactive_at = new Date(
+      now +
+      6 * 60 * 60 * 1000 +
+      Math.random() * (12 * 60 * 60 * 1000)
+    ).toISOString();
+
+    memory.proactive_sent = Array.isArray(
+      memory.proactive_sent
+    )
+      ? memory.proactive_sent
+      : [];
+
     memory.proactive_sent.push({
       text: finalText,
       time: new Date().toISOString(),
     });
+
     saveJson(MEMORY_PATH, memory);
+
   } catch (err) {
-    console.warn('Proactive Telegram message failed:', err);
+    console.warn(
+      'Proactive Telegram message failed:',
+      err
+    );
   }
 }
 
