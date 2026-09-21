@@ -1097,14 +1097,62 @@ async function sendTelegramVoice(chatId: number, caption = ''): Promise<boolean>
   return true;
 }
 
-async function sendTelegramPhoto(chatId: number, caption = ''): Promise<boolean> {
-  if (!TELEGRAM_PHOTO_URL) return false;
-  await telegramRequest('sendPhoto', {
-    chat_id: chatId,
-    photo: TELEGRAM_PHOTO_URL,
-    caption: caption.slice(0, 1024),
-  });
-  return true;
+async function sendTelegramPhoto(
+  chatId: number,
+  prompt: string,
+  caption = ''
+): Promise<boolean> {
+  if (!POLLINATIONS_API_KEY) return false;
+
+  try {
+    const imageUrl =
+      `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}`;
+
+    const response = await fetch(imageUrl, {
+      headers: {
+        Authorization: `Bearer ${POLLINATIONS_API_KEY}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Pollinations error: ${response.status}`);
+    }
+
+    const imageBuffer = await response.arrayBuffer();
+
+    const form = new FormData();
+    form.append('chat_id', String(chatId));
+    form.append(
+      'photo',
+      new Blob([imageBuffer], { type: 'image/jpeg' }),
+      'hori-image.jpg'
+    );
+
+    if (caption) {
+      form.append('caption', caption.slice(0, 1024));
+    }
+
+    const telegramResponse = await fetch(
+      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`,
+      {
+        method: 'POST',
+        body: form,
+      }
+    );
+
+    const result = await telegramResponse.json();
+
+    if (!telegramResponse.ok || !result.ok) {
+      throw new Error(
+        `Telegram photo error: ${JSON.stringify(result)}`
+      );
+    }
+
+    return true;
+  } catch (err) {
+    console.warn('Generated photo failed:', err);
+    return false;
+  }
 }
 
 function isVoiceRequest(text: string): boolean {
@@ -1134,9 +1182,13 @@ async function handleTelegramMessage(chatId: number, text: string, history: any[
   if (isVoiceRequest(cleanText) && !TELEGRAM_VOICE_URL) {
     reply += '\n\nЯ могу прислать голосовое, но для этого нужен TELEGRAM_VOICE_URL с аудиофайлом .ogg или .mp3.';
   }
-  if (isPhotoRequest(cleanText) && !TELEGRAM_PHOTO_URL) {
-    reply += '\n\nЯ могу прислать фото, но пока не настроен TELEGRAM_PHOTO_URL с доступной картинкой.';
-  }
+  if (isPhotoRequest(cleanText)) {
+  await sendTelegramPhoto(
+    chatId,
+    'Anime illustration of Hori Kyouko, warm colors, beautiful detailed background',
+    'Вот, держи 🎨'
+  );
+}
 
   const memory = ensureMemoryState(loadJson<any>(MEMORY_PATH, {
     user_name: 'мой любимый',
