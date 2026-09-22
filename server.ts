@@ -3,6 +3,8 @@ import express, { Request, Response } from 'express';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 
@@ -30,6 +32,8 @@ function loadDotEnvFromProjectAndHome() {
     }
   }
 }
+
+const execFileAsync = promisify(execFile);
 
 loadDotEnvFromProjectAndHome();
 
@@ -1162,15 +1166,109 @@ async function sendTelegramReply(chatId: number, text: string) {
   }
 }
 
-async function sendTelegramVoice(chatId: number, caption = ''): Promise<boolean> {
-  if (!TELEGRAM_VOICE_URL) return false;
-  await telegramRequest('sendVoice', {
-    chat_id: chatId,
-    voice: TELEGRAM_VOICE_URL,
-    caption: caption.slice(0, 1024),
+async function generateTelegramVoiceAudio(text: string): Promise<{ buffer: Buffer; contentType: string } | null> {
+  if (!POLLINATIONS_API_KEY || !text.trim()) return null;
+
+  const model = process.env.POLLINATIONS_TTS_MODEL || 'qwen/qwen3-tts-instruct-flash';
+  const voice = process.env.POLLINATIONS_TTS_VOICE || 'nova';
+  const input = text.replace(/\\s+/g, ' ').trim().slice(0, 5000);
+  const response = await fetch('https://gen.pollinations.ai/v1/audio/speech', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer ' + POLLINATIONS_API_KEY,
+      Accept: 'audio/wav,audio/mpeg,audio/opus,audio/*',
+    },
+    body: JSON.stringify({
+      model,
+      input,
+      voice,
+      response_format: 'wav',
+      instructions: 'Speak naturally in Russian, with a warm conversational female voice. Clear pronunciation, moderate pace, natural pauses. Do not add words that are not in the input.',
+    }),
+    signal: AbortSignal.timeout(60000),
   });
-  return true;
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error('Pollinations TTS HTTP ' + response.status + ': ' + body.slice(0, 600));
+  }
+
+  const contentType = response.headers.get('content-type') || 'audio/wav';
+  if (!contentType.startsWith('audio/')) {
+    const body = await response.text();
+    throw new Error('Pollinations TTS returned non-audio content-type=' + contentType + ': ' + body.slice(0, 500));
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  if (!arrayBuffer.byteLength) throw new Error('Pollinations TTS returned empty audio.');
+  return { buffer: Buffer.from(arrayBuffer), contentType };
 }
+
+async function sendTelegramVoice(chatId: number, text: string): Promise<boolean> {
+  if (TELEGRAM_VOICE_URL) {
+    await telegramRequest('sendVoice', {
+      chat_id: chatId,
+      voice: TELEGRAM_VOICE_URL,
+      caption: text.slice(0, 1024),
+    });
+    return true;
+  }
+
+  const generated = await generateTelegramVoiceAudio(text);
+  if (!generated) return false;
+
+  const stamp = Date.now();
+  const inputPath = path.join(os.tmpdir(), 'hori-voice-' + stamp + '-input.wav');
+  const outputPath = path.join(os.tmpdir(), 'hori-voice-' + stamp + '.ogg');
+
+  try {
+    await fs.promises.writeFile(inputPath, generated.buffer);
+
+    const ffmpegPath = (await import('ffmpeg-static')).default;
+    if (!ffmpegPath) throw new Error('ffmpeg-static binary is unavailable.');
+
+    await execFileAsync(ffmpegPath, [
+      '-y',
+      '-i', inputPath,
+      '-c:a', 'libopus',
+      '-b:a', '48k',
+      '-vbr', 'on',
+      '-application', 'voip',
+      outputPath,
+    ], { timeout: 60000 });
+
+    const voiceBuffer = await fs.promises.readFile(outputPath);
+    if (!voiceBuffer.length) throw new Error('Converted voice file is empty.');
+
+    const form = new FormData();
+    form.append('chat_id', String(chatId));
+    form.append('voice', new Blob([voiceBuffer], { type: 'audio/ogg' }), 'hori-voice.ogg');
+
+    const telegramResponse = await fetch(
+      'https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendVoice',
+      { method: 'POST', body: form, signal: AbortSignal.timeout(30000) },
+    );
+    const result = await telegramResponse.json();
+    if (!telegramResponse.ok || !result.ok) {
+      throw new Error('Telegram sendVoice failed: ' + JSON.stringify(result).slice(0, 700));
+    }
+
+    console.log('Telegram generated voice sent successfully chat=' + chatId + ' model=' + modelSafeName(modelForLog));
+    return true;
+  } finally {
+    await Promise.all([
+      fs.promises.unlink(inputPath).catch(() => undefined),
+      fs.promises.unlink(outputPath).catch(() => undefined),
+    ]);
+  }
+}
+
+function modelSafeName(model: string): string {
+  return model.replace(/[^a-zA-Z0-9_./:-]/g, '').slice(0, 120);
+}
+
+const modelForLog = process.env.POLLINATIONS_TTS_MODEL || 'qwen/qwen3-tts-instruct-flash';
 
 async function sendTelegramPhoto(
   chatId: number,
@@ -1375,7 +1473,7 @@ async function handleTelegramMessage(chatId: number, text: string, history: any[
   updateConversationState(reflectedMemory, cleanText, finalReply, decision);
   saveTrainingExample(cleanText, finalReply, false);
 
-  if (decision.sendVoice && TELEGRAM_VOICE_URL) {
+  if (decision.sendVoice || isVoiceRequest(cleanText)) {
     await sendTelegramVoice(chatId, finalReply).catch((err) => console.warn('Telegram voice failed:', err));
   }
 
