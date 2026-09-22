@@ -996,11 +996,13 @@ async function generateTextWithConfiguredProvider(systemPrompt: string, userText
         });
 
         const text = response.text?.trim();
-        if (text && !isRepeatedAssistantResponse(text, history)) {
+        if (text) {
           markProviderSuccess(provider);
+          if (isRepeatedAssistantResponse(text, history)) {
+            console.warn('Gemini returned a repeated response; keeping it instead of spending another provider request.');
+          }
           return text;
         }
-        if (text) console.warn('Gemini returned a duplicate response, trying next provider.');
       } catch (err) {
         markProviderFailure(provider, err);
         console.warn('Gemini call failed, trying next provider:', err);
@@ -1019,11 +1021,13 @@ async function generateTextWithConfiguredProvider(systemPrompt: string, userText
         temperature: 0.85,
       });
 
-      if (text && !isRepeatedAssistantResponse(text, history)) {
+      if (text) {
         markProviderSuccess(provider);
+        if (isRepeatedAssistantResponse(text, history)) {
+          console.warn(`${provider.label} returned a repeated response; keeping it instead of spending another provider request.`);
+        }
         return text;
       }
-      if (text) console.warn(`${provider.label} returned a duplicate response, trying next provider.`);
     } catch (err) {
       markProviderFailure(provider, err);
       console.warn(`${provider.label} call failed:`, err);
