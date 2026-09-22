@@ -1234,12 +1234,30 @@ function isPhotoRequest(text: string): boolean {
   return /(фото|фотку|фотограф|картинк|селфи|изображен|нарисуй|сгенерируй|покажи.*(?:фото|картин)|пришли.*(?:фото|картин))/i.test(text);
 }
 
+function isHoriSelfPhotoRequest(text: string): boolean {
+  const lower = (text || '').toLowerCase();
+  const asksForSelf = /(?:себя|себе|сво[юя]|свой|своя|сам[ау]|сам[ао]|меня|хори|кёко|kyouko|kyoko|hori)/i.test(lower);
+  const photoIntent = /(?:фото|фотку|фотограф|картинк|изображен|селфи|портрет|покажи|пришли|отправь|нарисуй|сгенерируй)/i.test(lower);
+  return asksForSelf && photoIntent;
+}
+
 function buildImagePrompt(text: string): string {
   const cleaned = (text || '')
     .replace(/^(?:пожалуйста[,:]?\s*)?(?:пришли|покажи|сделай|создай|сгенерируй|нарисуй|отправь)\s+/i, '')
     .replace(/\b(?:мне|фото|фотку|фотографию|картинку|изображение|селфи)\b/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+
+  if (isHoriSelfPhotoRequest(text)) {
+    return [
+      'Create a high-quality anime-style portrait of Kyouko Hori (Hori) from Horimiya.',
+      'She is the specific character the user means by "Хори", "Кёко", "себя" or "фото себя".',
+      'Use Hori Kyouko character identity and appearance from Horimiya; do not replace her with a random landscape, object, or generic person.',
+      cleaned ? 'Scene/request: ' + cleaned + '.' : 'Natural friendly selfie-style portrait.',
+      'Keep her recognizable as Kyouko Hori. No text unless explicitly requested.'
+    ].join(' ');
+  }
+
   return cleaned
     ? 'Create a high-quality image based on this request: ' + cleaned + '. No text unless explicitly requested.'
     : 'Create a high-quality, friendly illustrative image.';
