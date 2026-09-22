@@ -235,7 +235,7 @@ function isRepeatedAssistantResponse(text: string, history: any[]): boolean {
 
 function detectTaskType(text: string): 'coding' | 'error' | 'math' | 'logic' | 'search' | 'fast' | 'learning' | 'creative' | 'emotional' | 'long' | 'image' | 'generic' {
   const lower = (text || '').toLowerCase();
-  if (/(картинк|изображен|нарисуй|сгенерируй.*(фото|картин|изображ)|flux)/i.test(lower)) return 'image';
+  if (/(фото|фотку|фотограф|картинк|изображен|селфи|нарисуй|сгенерируй|покажи.*(?:фото|картин)|пришли.*(?:фото|картин)|flux)/i.test(lower)) return 'image';
   if (/(найди|поищи|поиск|интернет|источник|ссылка|новост|актуальн|последн|сегодняшн|кто такой|что произошло)/i.test(lower)) return 'search';
   if (/(объясни|обучи|обучение|урок|научи|разбери тему|как работает|что такое)/i.test(lower)) return 'learning';
   if (/(план|планирование|рассужд|логик|проанализ|анализ задач|пошагово|стратег)/i.test(lower)) return 'logic';
@@ -348,7 +348,7 @@ function getProviderOrderByTask(taskType: string) {
     creative: ['pollinations-kimi', 'pollinations-claude-fast', 'gemini', 'cloud'],
     emotional: ['pollinations-kimi', 'pollinations-claude-fast', 'gemini', 'cloud'],
     long: ['pollinations-kimi', 'pollinations-deepseek', 'gemini', 'cloud'],
-    image: ['pollinations-kimi', 'pollinations-deepseek', 'gemini', 'cloud'],
+    image: [],
   };
 
   const order = weights[taskType] || weights.generic;
@@ -497,8 +497,7 @@ async function fetchPageSnapshot(url: string): Promise<{ title: string; url: str
   } catch (err) {
     markWebSourceFailure(source, err);
     console.warn(`Page fetch failed for ${url}:`, err);
-    return null;
-  }
+    return null;  }
 }
 
 async function fetchWebContextFromUrls(text: string): Promise<string> {
@@ -984,21 +983,27 @@ function generateInternalHoriThinker(systemPrompt: string, userText: string, his
 async function generateTextWithConfiguredProvider(systemPrompt: string, userText: string, history: any[] = []) {
   const taskType = detectTaskType(userText);
   const providerOrder = getProviderOrderByTask(taskType);
-  const useWebContext = INTERNAL_LEARNING_ENABLED && shouldUseWebContext(userText);
-  const siteContext = useWebContext ? await fetchWebContextFromUrls(userText) : '';
-  const [searchContext, wikipediaContext] = useWebContext
+  const hasExplicitUrl = extractUrlCandidates(userText).length > 0;
+  const useLegacyWebContext = INTERNAL_LEARNING_ENABLED
+    && shouldUseWebContext(userText)
+    && (taskType !== 'search' || hasExplicitUrl);
+  const siteContext = useLegacyWebContext ? await fetchWebContextFromUrls(userText) : '';
+  const [searchContext, wikipediaContext] = useLegacyWebContext && taskType !== 'search'
     ? await Promise.all([fetchWebContext(userText), fetchWikipediaContext(userText)])
     : ['', ''];
-  const openWebContext = useWebContext ? await fetchOpenWebSources(userText) : '';
+  const openWebContext = useLegacyWebContext && taskType !== 'search'
+    ? await fetchOpenWebSources(userText)
+    : '';
   const webContext = [searchContext, wikipediaContext, openWebContext, siteContext].filter(Boolean).join('\n\n');
-  const enrichedPrompt = webContext
-    ? `${systemPrompt}\n\nДополнительный внешний контекст для обучения и уточнения: ${webContext}`
-    : systemPrompt;
+  const enrichedPrompt = taskType === 'search'
+    ? systemPrompt + '\n\nРЕЖИМ ПОИСКА: используй доступный веб-поиск этой модели. Ищи актуальные данные, отделяй факты от предположений, указывай названия источников и даты, если они доступны. Не выдумывай источники или ссылки.' + (webContext ? '\n\nДанные по указанной ссылке:\n' + webContext : '')
+    : webContext
+      ? systemPrompt + '\n\nДополнительный внешний контекст для обучения и уточнения: ' + webContext
+      : systemPrompt;
 
   for (const provider of providerOrder) {
     if (isProviderCoolingDown(provider)) {
-      console.warn(`${provider.label} skipped because it is cooling down.`);
-      continue;
+      console.warn(`${provider.label} skipped because it is cooling down.`);      continue;
     }
 
     if (provider.kind.startsWith('pollinations-')) {
@@ -1173,55 +1178,51 @@ async function sendTelegramPhoto(
   prompt: string,
   caption = ''
 ): Promise<boolean> {
-  if (!POLLINATIONS_API_KEY) return false;
-
+  if (!POLLINATIONS_API_KEY) {
+    console.warn('Generated photo skipped: POLLINATIONS_API_KEY is missing.');
+    return false;
+  }
   try {
-    const imageUrl =
-      `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?model=${encodeURIComponent(process.env.POLLINATIONS_IMAGE_MODEL || 'flux')}`;
-
+    const model = process.env.POLLINATIONS_IMAGE_MODEL || 'flux';
+    const imageUrl = 'https://gen.pollinations.ai/image/' + encodeURIComponent(prompt) + '?model=' + encodeURIComponent(model);
+    console.log('[Pollinations] image request model=' + model);
     const response = await fetch(imageUrl, {
-      headers: {
-        Authorization: `Bearer ${POLLINATIONS_API_KEY}`,
-      },
+      headers: { Authorization: 'Bearer ' + POLLINATIONS_API_KEY, Accept: 'image/*' },
+      signal: AbortSignal.timeout(60000),
     });
-
     if (!response.ok) {
-      throw new Error(`Pollinations error: ${response.status}`);
+      const body = await response.text();
+      console.error('[Pollinations] image HTTP ' + response.status + ': ' + body.slice(0, 800));
+      return false;
     }
-
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.startsWith('image/')) {
+      const body = await response.text();
+      console.error('[Pollinations] image returned non-image content-type=' + contentType + ': ' + body.slice(0, 500));
+      return false;
+    }
     const imageBuffer = await response.arrayBuffer();
-
+    if (!imageBuffer.byteLength) {
+      console.error('[Pollinations] image response was empty.');
+      return false;
+    }
     const form = new FormData();
     form.append('chat_id', String(chatId));
-    form.append(
-      'photo',
-      new Blob([imageBuffer], { type: 'image/jpeg' }),
-      'hori-image.jpg'
-    );
-
-    if (caption) {
-      form.append('caption', caption.slice(0, 1024));
-    }
-
+    form.append('photo', new Blob([imageBuffer], { type: contentType || 'image/jpeg' }), 'xori-image.jpg');
+    if (caption) form.append('caption', caption.slice(0, 1024));
     const telegramResponse = await fetch(
-      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`,
-      {
-        method: 'POST',
-        body: form,
-      }
+      'https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendPhoto',
+      { method: 'POST', body: form, signal: AbortSignal.timeout(30000) }
     );
-
     const result = await telegramResponse.json();
-
     if (!telegramResponse.ok || !result.ok) {
-      throw new Error(
-        `Telegram photo error: ${JSON.stringify(result)}`
-      );
+      console.error('Telegram photo error: ' + JSON.stringify(result).slice(0, 800));
+      return false;
     }
-
+    console.log('Telegram photo sent successfully chat=' + chatId);
     return true;
   } catch (err) {
-    console.warn('Generated photo failed:', err);
+    console.error('Generated photo failed:', err);
     return false;
   }
 }
@@ -1230,14 +1231,36 @@ function isVoiceRequest(text: string): boolean {
   return /(голосов|голосом|озвуч|скажи голосом|аудио)/i.test(text);
 }
 
+function isVoiceRequest(text: string): boolean {
+  return /(голосов|голосом|озвуч|скажи голосом|аудио)/i.test(text);
+}
+
 function isPhotoRequest(text: string): boolean {
-  return /(фото|фотку|фотограф|картинк|селфи|изображен)/i.test(text);
+  return /(фото|фотку|фотограф|картинк|селфи|изображен|нарисуй|сгенерируй|покажи.*(?:фото|картин)|пришли.*(?:фото|картин))/i.test(text);
+}
+
+function buildImagePrompt(text: string): string {
+  const cleaned = (text || '')
+    .replace(/^(?:пожалуйста[,:]?\s*)?(?:пришли|покажи|сделай|создай|сгенерируй|нарисуй|отправь)\s+/i, '')
+    .replace(/\b(?:мне|фото|фотку|фотографию|картинку|изображение|селфи)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned
+    ? 'Create a high-quality image based on this request: ' + cleaned + '. No text unless explicitly requested.'
+    : 'Create a high-quality, friendly illustrative image.';
 }
 
 async function handleTelegramMessage(chatId: number, text: string, history: any[]) {
   const { cleanText, warning } = moderateInput(text);
   if (warning) return warning;
-  if (!cleanText) return 'Напиши мне что-нибудь, мой любимый.';
+  if (!cleanText) return 'Напиши мне что-нибудь.';
+
+  if (isPhotoRequest(cleanText)) {
+    const imagePrompt = buildImagePrompt(cleanText);
+    const sent = await sendTelegramPhoto(chatId, imagePrompt, 'Вот, держи 🎨');
+    if (sent) return '';
+    return 'Я попробовала сгенерировать изображение, но Pollinations или Telegram не приняли картинку. Проверь логи — я записала точную причину.';
+  }
 
   let reply = '';
   try {
@@ -1245,38 +1268,16 @@ async function handleTelegramMessage(chatId: number, text: string, history: any[
   } catch (err) {
     console.warn('Telegram AI error:', err);
   }
-
-  if (!reply) {
-    return 'Я не могу ответить: все API-провайдеры сейчас недоступны. Проверь ключи в .env.';
-  }
-
+  if (!reply) return 'Я не могу ответить: все API-провайдеры сейчас недоступны. Проверь ключи в Render.';
   if (isVoiceRequest(cleanText) && !TELEGRAM_VOICE_URL) {
     reply += '\n\nЯ могу прислать голосовое, но для этого нужен TELEGRAM_VOICE_URL с аудиофайлом .ogg или .mp3.';
   }
-  if (isPhotoRequest(cleanText)) {
-    await sendTelegramPhoto(
-      chatId,
-      cleanText,
-      'Вот, держи 🎨'
-    );
-  }
 
   const memory = ensureMemoryState(loadJson<any>(MEMORY_PATH, {
-    user_name: 'мой любимый',
-    facts: [],
-    conversations: [],
-    interests: [],
-    current_topics: [],
-    inner_thoughts: [],
-    reflection_log: [],
-    mood: 'спокойное',
-    emotion: 'calm',
-    energy: 72,
-    last_interaction: new Date().toISOString(),
-    proactive_sent: [],
-    last_chat_id: null,
+    user_name: 'мой любимый', facts: [], conversations: [], interests: [], current_topics: [],
+    inner_thoughts: [], reflection_log: [], mood: 'спокойное', emotion: 'calm', energy: 72,
+    last_interaction: new Date().toISOString(), proactive_sent: [], last_chat_id: null,
   }));
-
   const updatedMemory = updateMemoryFromUserMessage(cleanText, memory);
   const reflectedMemory = await syncInnerMonologue(cleanText, updatedMemory, history);
   reflectedMemory.last_chat_id = chatId;
@@ -1285,14 +1286,16 @@ async function handleTelegramMessage(chatId: number, text: string, history: any[
     lastConversation.hori = reply;
   } else {
     reflectedMemory.conversations = [...reflectedMemory.conversations, {
-      user: cleanText,
-      hori: reply,
-      time: new Date().toISOString(),
+      user: cleanText, hori: reply, time: new Date().toISOString(),
     }].slice(-40);
   }
-  reflectedMemory.mood = reflectedMemory.emotion === 'happy' ? 'весёлое' : reflectedMemory.emotion === 'sad' ? 'сдержанное' : reflectedMemory.emotion === 'angry' ? 'поджатое' : 'спокойное';
+  reflectedMemory.mood = reflectedMemory.emotion === 'happy' ? 'весёлое'
+    : reflectedMemory.emotion === 'sad' ? 'сдержанное'
+    : reflectedMemory.emotion === 'angry' ? 'поджатое' : 'спокойное';
   saveJson(MEMORY_PATH, reflectedMemory);
-  if (isVoiceRequest(cleanText)) await sendTelegramVoice(chatId, reply).catch((err) => console.warn('Telegram voice failed:', err));
+  if (isVoiceRequest(cleanText)) {
+    await sendTelegramVoice(chatId, reply).catch((err) => console.warn('Telegram voice failed:', err));
+  }
   return reply;
 }
 
@@ -1352,7 +1355,9 @@ async function startTelegramPolling() {
         const history = histories.get(chatId) || (savedMemory.last_chat_id === chatId ? savedHistory : []);
         await telegramRequest('sendChatAction', { chat_id: chatId, action: 'typing' });
         const reply = await handleTelegramMessage(chatId, text, history.slice(-8));
-        await sendTelegramReply(chatId, reply);
+        if (reply) {
+          await sendTelegramReply(chatId, reply);
+        }
         const nextHistory: Array<{ sender: 'user' | 'hori'; text: string }> = [
           ...history,
           { sender: 'user', text },
@@ -1361,7 +1366,13 @@ async function startTelegramPolling() {
         histories.set(chatId, nextHistory.slice(-12));
       }
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       console.error('Telegram polling error:', err);
+      if (/409|Conflict.*getUpdates|terminated by other getUpdates/i.test(message)) {
+        console.error('Telegram polling stopped: another bot instance is using getUpdates.');
+        telegramPollingStarted = false;
+        return;
+      }
       await new Promise((resolve) => setTimeout(resolve, 5000));
     }
     void poll();
@@ -1497,8 +1508,7 @@ function buildInnerMonologueFallback(userText: string, memory: any): string {
 
 async function syncInnerMonologue(userText: string, memory: any, history: any[] = []) {
   const next = ensureMemoryState(memory);
-  const recentContext = history.slice(-3).map((item: any) => item?.text || '').filter(Boolean).join(' | ');
-  const prompt = `${buildSystemPrompt()}\nСделай только одну короткую внутреннюю мысль Хори Кёко (1-2 предложения) о том, как она сейчас воспринимает собеседника и тему разговора. Ты пишешь не для пользователя, а как её внутренний рефлекс. Без лишней воды, от первого лица, очень естественно.`;
+  const recentContext = history.slice(-3).map((item: any) => item?.text || '').filter(Boolean).join(' | ');  const prompt = `${buildSystemPrompt()}\nСделай только одну короткую внутреннюю мысль Хори Кёко (1-2 предложения) о том, как она сейчас воспринимает собеседника и тему разговора. Ты пишешь не для пользователя, а как её внутренний рефлекс. Без лишней воды, от первого лица, очень естественно.`;
 
   let thought = '';
   try {
@@ -1997,8 +2007,7 @@ app.post('/api/diary/generate', async (req, res) => {
   }
 
   const newEntry = {
-    id: Date.now().toString(),
-    title: `Вечерние мысли (${new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })})`,
+    id: Date.now().toString(),    title: `Вечерние мысли (${new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })})`,
     text: thought,
     mood: 'Тёплое 🌸',
     date: new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }),
