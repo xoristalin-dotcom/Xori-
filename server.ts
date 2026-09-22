@@ -1167,42 +1167,30 @@ async function sendTelegramReply(chatId: number, text: string) {
 }
 
 async function generateTelegramVoiceAudio(text: string): Promise<{ buffer: Buffer; contentType: string } | null> {
-  if (!POLLINATIONS_API_KEY || !text.trim()) return null;
+  if (!text.trim()) return null;
 
-  const model = process.env.POLLINATIONS_TTS_MODEL || 'qwen/qwen3-tts-instruct-flash';
-  const voice = process.env.POLLINATIONS_TTS_VOICE || 'nova';
-  const input = text.replace(/\\s+/g, ' ').trim().slice(0, 5000);
-  const response = await fetch('https://gen.pollinations.ai/v1/audio/speech', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: 'Bearer ' + POLLINATIONS_API_KEY,
-      Accept: 'audio/wav,audio/mpeg,audio/opus,audio/*',
-    },
-    body: JSON.stringify({
-      model,
-      input,
+  const input = text.replace(/\s+/g, ' ').trim().slice(0, 5000);
+  const voice = process.env.TELEGRAM_FREE_TTS_VOICE || 'ru-RU-SvetlanaNeural';
+  const outputPath = path.join(os.tmpdir(), 'hori-free-tts-' + Date.now() + '.mp3');
+
+  try {
+    const { EdgeTTS } = await import('node-edge-tts');
+    const tts = new EdgeTTS({
       voice,
-      response_format: 'wav',
-      instructions: 'Speak naturally in Russian, with a warm conversational female voice. Clear pronunciation, moderate pace, natural pauses. Do not add words that are not in the input.',
-    }),
-    signal: AbortSignal.timeout(60000),
-  });
+      lang: 'ru-RU',
+      outputFormat: 'audio-24khz-48kbitrate-mono-mp3',
+      timeout: 30000,
+    });
+    await tts.ttsPromise(input, outputPath);
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error('Pollinations TTS HTTP ' + response.status + ': ' + body.slice(0, 600));
+    const buffer = await fs.promises.readFile(outputPath);
+    if (!buffer.length) throw new Error('Free TTS returned empty audio.');
+
+    console.log('[Free TTS] generated Russian voice=' + voice + ' bytes=' + buffer.length);
+    return { buffer, contentType: 'audio/mpeg' };
+  } finally {
+    await fs.promises.unlink(outputPath).catch(() => undefined);
   }
-
-  const contentType = response.headers.get('content-type') || 'audio/wav';
-  if (!contentType.startsWith('audio/')) {
-    const body = await response.text();
-    throw new Error('Pollinations TTS returned non-audio content-type=' + contentType + ': ' + body.slice(0, 500));
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  if (!arrayBuffer.byteLength) throw new Error('Pollinations TTS returned empty audio.');
-  return { buffer: Buffer.from(arrayBuffer), contentType };
 }
 
 async function sendTelegramVoice(chatId: number, text: string): Promise<boolean> {
@@ -1219,7 +1207,7 @@ async function sendTelegramVoice(chatId: number, text: string): Promise<boolean>
   if (!generated) return false;
 
   const stamp = Date.now();
-  const inputPath = path.join(os.tmpdir(), 'hori-voice-' + stamp + '-input.wav');
+  const inputPath = path.join(os.tmpdir(), 'hori-voice-' + stamp + '-input.mp3');
   const outputPath = path.join(os.tmpdir(), 'hori-voice-' + stamp + '.ogg');
 
   try {
@@ -1254,7 +1242,7 @@ async function sendTelegramVoice(chatId: number, text: string): Promise<boolean>
       throw new Error('Telegram sendVoice failed: ' + JSON.stringify(result).slice(0, 700));
     }
 
-    console.log('Telegram generated voice sent successfully chat=' + chatId + ' model=' + modelSafeName(modelForLog));
+    console.log('Telegram free generated voice sent successfully chat=' + chatId + ' model=node-edge-tts voice=' + modelSafeName(process.env.TELEGRAM_FREE_TTS_VOICE || 'ru-RU-SvetlanaNeural'));
     return true;
   } finally {
     await Promise.all([
@@ -1267,8 +1255,6 @@ async function sendTelegramVoice(chatId: number, text: string): Promise<boolean>
 function modelSafeName(model: string): string {
   return model.replace(/[^a-zA-Z0-9_./:-]/g, '').slice(0, 120);
 }
-
-const modelForLog = process.env.POLLINATIONS_TTS_MODEL || 'qwen/qwen3-tts-instruct-flash';
 
 async function sendTelegramPhoto(
   chatId: number,
