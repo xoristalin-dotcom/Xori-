@@ -1,10 +1,9 @@
 import os
-import spaces
 import gradio as gr
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-MODEL_ID = os.getenv("XORI_MODEL_ID", "Qwen/Qwen2.5-0.5B-Instruct")
+MODEL_ID = os.getenv("XORI_MODEL_ID", "Abobus2222228/Xoritg")
 MAX_NEW_TOKENS = int(os.getenv("XORI_MAX_NEW_TOKENS", "256"))
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
@@ -14,7 +13,7 @@ model = AutoModelForCausalLM.from_pretrained(
     device_map="auto",
 )
 
-def _generate(prompt: str) -> str:
+def generate(prompt: str) -> str:
     messages = [
         {
             "role": "system",
@@ -42,10 +41,10 @@ def _generate(prompt: str) -> str:
     generated = output[0][inputs["input_ids"].shape[1]:]
     return tokenizer.decode(generated, skip_special_tokens=True).strip()
 
-@spaces.GPU
-def generate(prompt: str) -> str:
-    return _generate(prompt)
-
-gr.api(generate, api_name="generate", concurrency_limit=1)
-gr.Markdown("# Xori
-Remote conversation inference for the Xori project.")
+gr.Interface(
+    fn=generate,
+    inputs=gr.Textbox(label="Prompt"),
+    outputs=gr.Textbox(label="Response"),
+    title="Xori",
+    description="Remote conversation inference for the Xori project.",
+).launch()
