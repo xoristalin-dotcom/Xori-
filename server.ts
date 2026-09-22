@@ -1570,23 +1570,16 @@ async function startTelegramPolling() {
   ]).filter(Boolean) as Array<{ sender: 'user' | 'hori'; text: string }>;
   const histories = new Map<number, Array<{ sender: 'user' | 'hori'; text: string }>>();
 
-  const publicUrl = (process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
-  if (publicUrl) {
-    const webhookUrl = publicUrl + '/telegram/webhook';
-    await telegramRequest('setWebhook', {
-      url: webhookUrl,
-      drop_pending_updates: false,
-      allowed_updates: ['message'],
-    });
-    const info = await telegramRequest('getWebhookInfo');
-    console.log('Telegram webhook enabled: ' + webhookUrl + ' pending=' + (info?.pending_update_count ?? 0));
-    return;
-  }
-
-  // Local development fallback: long polling is used only when Render's public URL is unavailable.
+  // Use one controlled long-polling loop instead of the webhook.
+  // The webhook was being registered successfully, but Render showed no incoming
+  // webhook requests after deployment. We explicitly remove any old webhook first
+  // so Telegram cannot split delivery between webhook and getUpdates.
   await telegramRequest('deleteWebhook', { drop_pending_updates: false });
+  const webhookInfo = await telegramRequest('getWebhookInfo');
+  console.log('Telegram webhook cleared: ' + JSON.stringify(webhookInfo || {}));
+
   const bot = await telegramRequest('getMe');
-  console.log('Telegram local polling enabled for @' + (bot?.username || 'bot'));
+  console.log('Telegram long polling enabled for @' + (bot?.username || 'bot'));
 
   let offset = 0;
   const poll = async () => {
