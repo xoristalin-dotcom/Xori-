@@ -1241,7 +1241,26 @@ function isHoriSelfPhotoRequest(text: string): boolean {
   return asksForSelf && photoIntent;
 }
 
-function buildImagePrompt(text: string): string {
+async function fetchHoriVisualReference(): Promise<string> {
+  if (!WEB_SEARCH_ENABLED) return '';
+
+  const sources = [
+    'https://ru.wikipedia.org/wiki/Хоримия',
+    'https://horimiya-anime.com/1st/character/',
+  ];
+
+  const snapshots: string[] = [];
+  for (const url of sources) {
+    const snapshot = await fetchPageSnapshot(url);
+    if (snapshot?.text) {
+      snapshots.push(`Источник: ${snapshot.title}\nСодержание: ${snapshot.text.slice(0, 2200)}`);
+    }
+  }
+
+  return snapshots.join('\n\n').slice(0, 4200);
+}
+
+function buildImagePrompt(text: string, visualReference: string = ''): string {
   const cleaned = (text || '')
     .replace(/^(?:пожалуйста[,:]?\s*)?(?:пришли|покажи|сделай|создай|сгенерируй|нарисуй|отправь)\s+/i, '')
     .replace(/\b(?:мне|фото|фотку|фотографию|картинку|изображение|селфи)\b/gi, ' ')
@@ -1249,12 +1268,17 @@ function buildImagePrompt(text: string): string {
     .trim();
 
   if (isHoriSelfPhotoRequest(text)) {
+    const onlineCanon = visualReference
+      ? `Use this live web reference as the visual canon for the character, especially appearance and character design: ${visualReference}`
+      : 'Use the canonical Horimiya anime character design for Kyouko Hori.';
+
     return [
       'Create a high-quality anime-style portrait of Kyouko Hori (Hori) from Horimiya.',
       'She is the specific character the user means by "Хори", "Кёко", "себя" or "фото себя".',
-      'Use Hori Kyouko character identity and appearance from Horimiya; do not replace her with a random landscape, object, or generic person.',
+      onlineCanon,
+      'Do not replace her with a generic anime girl, a random brunette, a landscape, or another character.',
       cleaned ? 'Scene/request: ' + cleaned + '.' : 'Natural friendly selfie-style portrait.',
-      'Keep her recognizable as Kyouko Hori. No text unless explicitly requested.'
+      'Keep her recognizable as Kyouko Hori from the Horimiya anime. No text unless explicitly requested.'
     ].join(' ');
   }
 
@@ -1269,7 +1293,10 @@ async function handleTelegramMessage(chatId: number, text: string, history: any[
   if (!cleanText) return 'Напиши мне что-нибудь.';
 
   if (isPhotoRequest(cleanText)) {
-    const imagePrompt = buildImagePrompt(cleanText);
+    const visualReference = isHoriSelfPhotoRequest(cleanText)
+      ? await fetchHoriVisualReference()
+      : '';
+    const imagePrompt = buildImagePrompt(cleanText, visualReference);
     const sent = await sendTelegramPhoto(chatId, imagePrompt, 'Вот, держи 🎨');
     if (sent) return '';
     return 'Я попробовала сгенерировать изображение, но Pollinations или Telegram не приняли картинку. Проверь логи — я записала точную причину.';
