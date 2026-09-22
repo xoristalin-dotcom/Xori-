@@ -221,10 +221,16 @@ function isRepeatedAssistantResponse(text: string, history: any[]): boolean {
     .some((item: any) => item?.text?.replace(/\s+/g, ' ').trim().toLowerCase() === normalized);
 }
 
-function detectTaskType(text: string): 'coding' | 'math' | 'creative' | 'emotional' | 'long' | 'generic' {
+function detectTaskType(text: string): 'coding' | 'error' | 'math' | 'logic' | 'search' | 'fast' | 'learning' | 'creative' | 'emotional' | 'long' | 'image' | 'generic' {
   const lower = (text || '').toLowerCase();
-  if (/(код|typescript|tsx|node|react|api|bug|ошибка|функция|класс|server|sql|python|docker|debug|fix)/i.test(lower)) return 'coding';
+  if (/(картинк|изображен|нарисуй|сгенерируй.*(фото|картин|изображ)|flux)/i.test(lower)) return 'image';
+  if (/(найди|поищи|поиск|интернет|источник|ссылка|новост|актуальн|последн|сегодняшн|кто такой|что произошло)/i.test(lower)) return 'search';
+  if (/(объясни|обучи|обучение|урок|научи|разбери тему|как работает|что такое)/i.test(lower)) return 'learning';
+  if (/(план|планирование|рассужд|логик|проанализ|анализ задач|пошагово|стратег)/i.test(lower)) return 'logic';
+  if (/(ошибка|баг|debug|fix|исправь|почему.*не работает|не работает|stack trace)/i.test(lower)) return 'error';
+  if (/(код|typescript|tsx|node|react|api|функция|класс|server|sql|python|docker|программ)/i.test(lower)) return 'coding';
   if (/(матем|формула|вычисл|сумма|доказ|производ|интеграл|логарифм|геом|триг|вероятност)/i.test(lower)) return 'math';
+  if (/(быстро|коротко|в двух словах|одним предложением|срочно)/i.test(lower) && (text || '').length < 500) return 'fast';
   if (/(придумай|сюжет|сценар|стих|рассказ|песен|реклам|текст|креатив|лир)/i.test(lower)) return 'creative';
   if (/(груст|устал|плохо|одиноко|тревож|страш|тоска|панику|шок|смущ|подавлен|депрес|тяжело)/i.test(lower)) return 'emotional';
   if ((text || '').length > 1200 || /(всю историю|дневник|помни|память|контекст|сначала|вчера|неделю|весь)/i.test(lower)) return 'long';
@@ -233,13 +239,13 @@ function detectTaskType(text: string): 'coding' | 'math' | 'creative' | 'emotion
 
 function getProviderOrderByTask(taskType: string) {
   const all = [
-    // Main chat: Pollinations free-tier models, Kimi first and DeepSeek as fallback.
+    // Pollinations task models. One key enables the configured Pollinations routes.
     {
       enabled: Boolean(process.env.POLLINATIONS_API_KEY),
       apiKey: process.env.POLLINATIONS_API_KEY,
       baseUrl: 'https://gen.pollinations.ai/v1',
       model: process.env.POLLINATIONS_KIMI_MODEL || 'kimi',
-      label: 'Pollinations Kimi',
+      label: 'Pollinations Kimi K2.5',
       kind: 'pollinations-kimi',
     },
     {
@@ -249,6 +255,30 @@ function getProviderOrderByTask(taskType: string) {
       model: process.env.POLLINATIONS_DEEPSEEK_MODEL || 'deepseek',
       label: 'Pollinations DeepSeek',
       kind: 'pollinations-deepseek',
+    },
+    {
+      enabled: Boolean(process.env.POLLINATIONS_API_KEY),
+      apiKey: process.env.POLLINATIONS_API_KEY,
+      baseUrl: 'https://gen.pollinations.ai/v1',
+      model: process.env.POLLINATIONS_GLM_MODEL || 'glm',
+      label: 'Pollinations GLM',
+      kind: 'pollinations-glm',
+    },
+    {
+      enabled: Boolean(process.env.POLLINATIONS_API_KEY),
+      apiKey: process.env.POLLINATIONS_API_KEY,
+      baseUrl: 'https://gen.pollinations.ai/v1',
+      model: process.env.POLLINATIONS_GEMINI_SEARCH_MODEL || 'gemini-search',
+      label: 'Pollinations Gemini Search',
+      kind: 'pollinations-gemini-search',
+    },
+    {
+      enabled: Boolean(process.env.POLLINATIONS_API_KEY),
+      apiKey: process.env.POLLINATIONS_API_KEY,
+      baseUrl: 'https://gen.pollinations.ai/v1',
+      model: process.env.POLLINATIONS_CLAUDE_FAST_MODEL || 'claude-fast',
+      label: 'Pollinations Claude Haiku',
+      kind: 'pollinations-claude-fast',
     },
     {
       enabled: Boolean(process.env.GEMINI_API_KEY),
@@ -293,14 +323,20 @@ function getProviderOrderByTask(taskType: string) {
   ];
 
   const weights: Record<string, string[]> = {
-    // Keep the existing routing for specialized elements.
-    coding: ['gemini', 'cloud', 'cloud', 'cloud', 'cloud'],
-    math: ['gemini', 'cloud', 'cloud', 'cloud', 'cloud'],
-    creative: ['cloud', 'gemini', 'cloud', 'cloud', 'cloud'],
-    emotional: ['gemini', 'cloud', 'cloud', 'cloud', 'cloud'],
-    long: ['gemini', 'cloud', 'cloud', 'cloud', 'cloud'],
-    // Main chat: Kimi -> DeepSeek -> existing providers.
-    generic: ['pollinations-kimi', 'pollinations-deepseek', 'gemini', 'cloud', 'cloud', 'cloud', 'cloud'],
+    // Main chat: Kimi K2.5 -> DeepSeek.
+    generic: ['pollinations-kimi', 'pollinations-deepseek', 'gemini', 'cloud'],
+    // Requested specialized elements.
+    logic: ['pollinations-glm', 'pollinations-kimi', 'gemini', 'cloud'],
+    search: ['pollinations-gemini-search', 'gemini', 'pollinations-kimi', 'cloud'],
+    fast: ['pollinations-claude-fast', 'pollinations-kimi', 'cloud', 'gemini'],
+    learning: ['pollinations-kimi', 'pollinations-deepseek', 'gemini', 'cloud'],
+    error: ['pollinations-deepseek', 'pollinations-kimi', 'gemini', 'cloud'],
+    coding: ['pollinations-deepseek', 'pollinations-kimi', 'gemini', 'cloud'],
+    math: ['pollinations-glm', 'pollinations-deepseek', 'gemini', 'cloud'],
+    creative: ['pollinations-kimi', 'pollinations-claude-fast', 'gemini', 'cloud'],
+    emotional: ['pollinations-kimi', 'pollinations-claude-fast', 'gemini', 'cloud'],
+    long: ['pollinations-kimi', 'pollinations-deepseek', 'gemini', 'cloud'],
+    image: ['pollinations-kimi', 'pollinations-deepseek', 'gemini', 'cloud'],
   };
 
   const order = weights[taskType] || weights.generic;
@@ -1125,7 +1161,7 @@ async function sendTelegramPhoto(
 
   try {
     const imageUrl =
-      `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}`;
+      `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?model=${encodeURIComponent(process.env.POLLINATIONS_IMAGE_MODEL || 'flux')}`;
 
     const response = await fetch(imageUrl, {
       headers: {
