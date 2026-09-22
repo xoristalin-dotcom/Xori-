@@ -34,3 +34,8 @@ _uptime_*.py
 hori_training.json
 
 как должна работать модель
+
+# Generated local Xori model artifacts
+xori_model/model.onnx
+xori_model/vocab.json
+xori_model/config.json
