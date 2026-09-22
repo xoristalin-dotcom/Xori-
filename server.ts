@@ -1557,6 +1557,12 @@ async function startTelegramPolling() {
   }
   telegramPollingStarted = true;
 
+  const publicUrl = (process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
+  if (!publicUrl) {
+    console.error('Telegram webhook cannot start: RENDER_EXTERNAL_URL is missing.');
+    return;
+  }
+
   console.log(
     'Telegram routing: ' +
       (process.env.POLLINATIONS_API_KEY ? 'Pollinations configured' : 'Pollinations image key missing') +
@@ -2400,10 +2406,12 @@ app.post('/api/chat', async (req, res) => {
 });
 
 app.post('/telegram/webhook', async (req, res) => {
-  try {
-    if (!TELEGRAM_BOT_TOKEN) return res.sendStatus(404);
+  if (!TELEGRAM_BOT_TOKEN) return res.sendStatus(404);
+  const update = req.body as TelegramUpdate;
+  console.log('Telegram webhook update received: ' + String(update?.update_id ?? 'unknown'));
+  res.sendStatus(200);
 
-    const update = req.body as TelegramUpdate;
+  try {
     const savedMemory = ensureMemoryState(loadJson<any>(MEMORY_PATH, { conversations: [] }));
     const savedHistory = (savedMemory.conversations || []).flatMap((item: any) => [
       item?.user ? { sender: 'user' as const, text: item.user } : null,
@@ -2420,10 +2428,8 @@ app.post('/telegram/webhook', async (req, res) => {
       savedHistory,
       savedMemory,
     );
-    res.sendStatus(200);
   } catch (err) {
     console.error('Telegram webhook error:', err);
-    res.sendStatus(200);
   }
 });
 
@@ -2436,7 +2442,7 @@ app.get('*', (req, res) => {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Hori server listening on port ${PORT}`);
   if (TELEGRAM_BOT_TOKEN) {
-    console.log('Starting Telegram polling...');
+    console.log('Starting Telegram webhook...');
     void startTelegramPolling().catch((err) => {
       console.error('Telegram polling startup failed:', err);
     });
