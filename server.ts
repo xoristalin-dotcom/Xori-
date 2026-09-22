@@ -233,6 +233,23 @@ function detectTaskType(text: string): 'coding' | 'math' | 'creative' | 'emotion
 
 function getProviderOrderByTask(taskType: string) {
   const all = [
+    // Main chat: Pollinations free-tier models, Kimi first and DeepSeek as fallback.
+    {
+      enabled: Boolean(process.env.POLLINATIONS_API_KEY),
+      apiKey: process.env.POLLINATIONS_API_KEY,
+      baseUrl: 'https://gen.pollinations.ai/v1',
+      model: process.env.POLLINATIONS_KIMI_MODEL || 'kimi',
+      label: 'Pollinations Kimi',
+      kind: 'pollinations-kimi',
+    },
+    {
+      enabled: Boolean(process.env.POLLINATIONS_API_KEY),
+      apiKey: process.env.POLLINATIONS_API_KEY,
+      baseUrl: 'https://gen.pollinations.ai/v1',
+      model: process.env.POLLINATIONS_DEEPSEEK_MODEL || 'deepseek',
+      label: 'Pollinations DeepSeek',
+      kind: 'pollinations-deepseek',
+    },
     {
       enabled: Boolean(process.env.GEMINI_API_KEY),
       apiKey: process.env.GEMINI_API_KEY,
@@ -276,12 +293,14 @@ function getProviderOrderByTask(taskType: string) {
   ];
 
   const weights: Record<string, string[]> = {
+    // Keep the existing routing for specialized elements.
     coding: ['gemini', 'cloud', 'cloud', 'cloud', 'cloud'],
     math: ['gemini', 'cloud', 'cloud', 'cloud', 'cloud'],
     creative: ['cloud', 'gemini', 'cloud', 'cloud', 'cloud'],
     emotional: ['gemini', 'cloud', 'cloud', 'cloud', 'cloud'],
     long: ['gemini', 'cloud', 'cloud', 'cloud', 'cloud'],
-    generic: ['gemini', 'cloud', 'cloud', 'cloud', 'cloud'],
+    // Main chat: Kimi -> DeepSeek -> existing providers.
+    generic: ['pollinations-kimi', 'pollinations-deepseek', 'gemini', 'cloud', 'cloud', 'cloud', 'cloud'],
   };
 
   const order = weights[taskType] || weights.generic;
@@ -1998,34 +2017,3 @@ app.post('/api/chat', async (req, res) => {
     reply,
     emotion,
     animation,
-    memory,
-  });
-});
-
-// Setup Vite middleware in dev or static serving in prod
-async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req: Request, res: Response) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
-
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Хори Кёко 3D сервер запущен на http://0.0.0.0:${PORT}`);
-    void startTelegramPolling().catch((err) => console.error('Telegram startup error:', err));
-    setInterval(() => {
-      void maybeGenerateNightlyDiary();
-      void maybeSendProactiveTelegramMessage();
-    }, 60 * 1000 * 10);
-  });
-}
-
-startServer();
