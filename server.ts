@@ -46,6 +46,7 @@ const providerCooldowns = new Map<string, number>();
 const providerLastErrors = new Map<string, string>();
 const providerLastSuccess = new Map<string, string>();
 const webSourceCooldowns = new Map<string, number>();
+let telegramPollingStarted = false;
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -989,6 +990,10 @@ async function generateTextWithConfiguredProvider(systemPrompt: string, userText
       continue;
     }
 
+    if (provider.kind.startsWith('pollinations-')) {
+      console.log('Trying ' + provider.label + ' (' + provider.model + ')...');
+    }
+
     if (provider.kind === 'gemini') {
       const gemini = getAI();
       if (!gemini) continue;
@@ -1238,12 +1243,12 @@ async function handleTelegramMessage(chatId: number, text: string, history: any[
     reply += '\n\nЯ могу прислать голосовое, но для этого нужен TELEGRAM_VOICE_URL с аудиофайлом .ogg или .mp3.';
   }
   if (isPhotoRequest(cleanText)) {
-  await sendTelegramPhoto(
-    chatId,
-    'Anime illustration of Hori Kyouko, warm colors, beautiful detailed background',
-    'Вот, держи 🎨'
-  );
-}
+    await sendTelegramPhoto(
+      chatId,
+      cleanText,
+      'Вот, держи 🎨'
+    );
+  }
 
   const memory = ensureMemoryState(loadJson<any>(MEMORY_PATH, {
     user_name: 'мой любимый',
@@ -1277,7 +1282,6 @@ async function handleTelegramMessage(chatId: number, text: string, history: any[
   reflectedMemory.mood = reflectedMemory.emotion === 'happy' ? 'весёлое' : reflectedMemory.emotion === 'sad' ? 'сдержанное' : reflectedMemory.emotion === 'angry' ? 'поджатое' : 'спокойное';
   saveJson(MEMORY_PATH, reflectedMemory);
   if (isVoiceRequest(cleanText)) await sendTelegramVoice(chatId, reply).catch((err) => console.warn('Telegram voice failed:', err));
-  if (isPhotoRequest(cleanText)) await sendTelegramPhoto(chatId, 'Вот, держи.').catch((err) => console.warn('Telegram photo failed:', err));
   return reply;
 }
 
@@ -1286,6 +1290,19 @@ async function startTelegramPolling() {
     console.warn('Telegram polling is disabled: BOT_TOKEN is not configured.');
     return;
   }
+
+  if (telegramPollingStarted) {
+    console.warn('Telegram polling is already running in this process; duplicate start ignored.');
+    return;
+  }
+  telegramPollingStarted = true;
+
+  console.log(
+    'Pollinations routing: ' +
+      (process.env.POLLINATIONS_API_KEY ? 'configured' : 'MISSING POLLINATIONS_API_KEY') +
+      '; Kimi=' + (process.env.POLLINATIONS_KIMI_MODEL || 'kimi') +
+      ', DeepSeek=' + (process.env.POLLINATIONS_DEEPSEEK_MODEL || 'deepseek')
+  );
 
   const savedMemory = ensureMemoryState(loadJson<any>(MEMORY_PATH, { conversations: [] }));
   const savedHistory = (savedMemory.conversations || []).flatMap((item: any) => [
