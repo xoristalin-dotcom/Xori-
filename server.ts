@@ -372,6 +372,12 @@ function getProviderOrderByTask(taskType: string) {
   });
 }
 
+function hasUsableExternalProvider(taskType: string): boolean {
+  return getProviderOrderByTask(taskType).some((provider) =>
+    Boolean(provider.enabled && provider.apiKey) && !isProviderCoolingDown(provider)
+  );
+}
+
 function getProviderStatus() {
   return getProviderOrderByTask('generic').map((provider) => ({
     name: provider.label,
@@ -995,6 +1001,11 @@ function generateInternalHoriThinker(systemPrompt: string, userText: string, his
 async function generateTextWithConfiguredProvider(systemPrompt: string, userText: string, history: any[] = []) {
   const taskType = detectTaskType(userText);
   const providerOrder = getProviderOrderByTask(taskType);
+  if (!hasUsableExternalProvider(taskType)) {
+    const localReply = generateInternalHoriThinker(systemPrompt, userText, history, '');
+    console.warn('[Local fallback] No healthy external provider is available; answering without API.');
+    return localReply;
+  }
   const hasExplicitUrl = extractUrlCandidates(userText).length > 0;
   const useLegacyWebContext = INTERNAL_LEARNING_ENABLED
     && shouldUseWebContext(userText)
@@ -1424,6 +1435,8 @@ async function handleTelegramMessage(chatId: number, text: string, history: any[
     return 'Я попробовала сгенерировать изображение, но Pollinations или Telegram не приняли картинку. Проверь логи — я записала точную причину.';
   }
 
+  const taskType = detectTaskType(cleanText);
+  const hadUsableProvider = hasUsableExternalProvider(taskType);
   let reply = '';
   try {
     reply = await generateTextWithConfiguredProvider(buildSystemPrompt(), cleanText, history);
@@ -1726,14 +1739,8 @@ async function syncInnerMonologue(userText: string, memory: any, history: any[] 
   const next = ensureMemoryState(memory);
   const recentContext = history.slice(-3).map((item: any) => item?.text || '').filter(Boolean).join(' | ');  const prompt = `${buildSystemPrompt()}\nСделай только одну короткую внутреннюю мысль Хори Кёко (1-2 предложения) о том, как она сейчас воспринимает собеседника и тему разговора. Ты пишешь не для пользователя, а как её внутренний рефлекс. Без лишней воды, от первого лица, очень естественно.`;
 
-  let thought = '';
-  try {
-    thought = await generateTextWithConfiguredProvider(prompt, `${userText}\n${recentContext}`.slice(0, 600), history);
-  } catch (err) {
-    console.warn('Inner monologue generation failed:', err);
-  }
-
-  const finalThought = (thought || buildInnerMonologueFallback(userText, next)).trim();
+  // Internal reflection is intentionally quota-free. It must never consume another cloud request.
+  const finalThought = buildInnerMonologueFallback(userText, next).trim();
   next.inner_thoughts = [...(Array.isArray(next.inner_thoughts) ? next.inner_thoughts : []), finalThought].slice(-8);
   next.reflection_log = [...(Array.isArray(next.reflection_log) ? next.reflection_log : []), {
     text: finalThought,
