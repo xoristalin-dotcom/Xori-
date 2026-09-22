@@ -156,6 +156,9 @@ async function callOpenAICompatible({
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   temperature?: number;
 }): Promise<string> {
+  const isPollinations = baseUrl.includes('gen.pollinations.ai');
+  if (isPollinations) console.log(`[Pollinations] request model=${model}`);
+
   const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -168,8 +171,15 @@ async function callOpenAICompatible({
       model,
       messages,
       temperature: temperature ?? 0.85,
+      max_tokens: 1024,
     }),
+    signal: AbortSignal.timeout(45000),
   });
+
+  if (isPollinations && !response.ok) {
+    const debugBody = await response.clone().text();
+    console.error(`[Pollinations] HTTP ${response.status} model=${model}: ${debugBody.slice(0, 800)}`);
+  }
 
   if (!response.ok) {
     const text = await response.text();
@@ -177,6 +187,7 @@ async function callOpenAICompatible({
   }
 
   const data = await response.json();
+  if (isPollinations) console.log(`[Pollinations] success model=${model}, choices=${Array.isArray(data?.choices) ? data.choices.length : 0}`);
   if (data?.error || (typeof data?.code === 'number' && data.code >= 400)) {
     const providerMessage = data?.error?.message || data?.msg || `provider code ${data.code}`;
     throw new Error(`Provider response error (${data.code || response.status}): ${providerMessage}`);
