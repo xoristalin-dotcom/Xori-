@@ -497,8 +497,7 @@ async function fetchPageSnapshot(url: string): Promise<{ title: string; url: str
   } catch (err) {
     markWebSourceFailure(source, err);
     console.warn(`Page fetch failed for ${url}:`, err);
-    return null;  }
-}
+    return null;  }}
 
 async function fetchWebContextFromUrls(text: string): Promise<string> {
   const urls = extractUrlCandidates(text);
@@ -997,8 +996,7 @@ async function generateTextWithConfiguredProvider(systemPrompt: string, userText
   const webContext = [searchContext, wikipediaContext, openWebContext, siteContext].filter(Boolean).join('\n\n');
   const enrichedPrompt = taskType === 'search'
     ? systemPrompt + '\n\nРЕЖИМ ПОИСКА: используй доступный веб-поиск этой модели. Ищи актуальные данные, отделяй факты от предположений, указывай названия источников и даты, если они доступны. Не выдумывай источники или ссылки.' + (webContext ? '\n\nДанные по указанной ссылке:\n' + webContext : '')
-    : webContext
-      ? systemPrompt + '\n\nДополнительный внешний контекст для обучения и уточнения: ' + webContext
+    : webContext      ? systemPrompt + '\n\nДополнительный внешний контекст для обучения и уточнения: ' + webContext
       : systemPrompt;
 
   for (const provider of providerOrder) {
@@ -1225,10 +1223,6 @@ async function sendTelegramPhoto(
     console.error('Generated photo failed:', err);
     return false;
   }
-}
-
-function isVoiceRequest(text: string): boolean {
-  return /(голосов|голосом|озвуч|скажи голосом|аудио)/i.test(text);
 }
 
 function isVoiceRequest(text: string): boolean {
@@ -1498,7 +1492,6 @@ function buildInnerMonologueFallback(userText: string, memory: any): string {
   if (emotion === 'happy') {
     return `Мне приятно, что сегодня у ${userName} хорошее настроение. Этот тон очень настраивает на тёплый разговор.`;
   }
-
   if (emotion === 'angry') {
     return `Сейчас я слышу раздражение. Не хочу срываться, но я тоже не хочу закрывать глаза на то, что давит на ${userName}.`;
   }
@@ -1997,8 +1990,7 @@ app.post('/api/diary/generate', async (req, res) => {
     console.warn('Diary generation fallback:', e);
   }
 
-  if (!thought) {
-    const reflections = [
+  if (!thought) {    const reflections = [
       `Сегодня был довольно насыщенный день. Сота снова попросил испечь печенье, а я поймала себя на мысли, как хорошо иногда просто остановиться и спокойно поболтать. Надеюсь, у ${memory.user_name || 'него'} тоже всё спокойно.`,
       `Вечером в доме Катагири наконец стало тихо. Закончила домашку и вымыла посуду. Приятно знать, что есть кто-то, кто всегда готов выслушать. Надо будет завтра приготовить что-нибудь вкусное.`,
       `Иногда бывает трудно совмещать школу и домашние заботы, но когда выдаётся минутка поговорить по душам — усталость как рукой снимает. Береги себя, ${memory.user_name || 'хороший мой'}.`,
