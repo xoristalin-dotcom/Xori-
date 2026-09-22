@@ -2064,4 +2064,16 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Hori server listening on port ${PORT}`);
+  if (TELEGRAM_BOT_TOKEN) {
+    console.log('Starting Telegram polling...');
+    void startTelegramPolling().catch((err) => {
+      console.error('Telegram polling startup failed:', err);
+    });
+    setInterval(() => {
+      void maybeGenerateNightlyDiary().catch((err) => console.warn('Nightly diary task failed:', err));
+      void maybeSendProactiveTelegramMessage().catch((err) => console.warn('Proactive Telegram task failed:', err));
+    }, 60 * 1000);
+  } else {
+    console.warn('Telegram polling not started: BOT_TOKEN is missing.');
+  }
 });
