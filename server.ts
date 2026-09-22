@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
+import { generateXoriNeuralReply, getXoriNeuralStatus } from './xori_neural';
 
 function loadDotEnvFromProjectAndHome() {
   const candidates = [
@@ -992,6 +993,23 @@ function generateInternalHoriThinker(systemPrompt: string, userText: string, his
 
 async function generateTextWithConfiguredProvider(systemPrompt: string, userText: string, history: any[] = []) {
   const taskType = detectTaskType(userText);
+
+  // Xori Neural is the first responder. It runs locally with no API key or quota.
+  // It only answers when its confidence is high enough; otherwise the request
+  // continues through the external model chain below.
+  if (taskType !== 'image') {
+    try {
+      const neuralReply = generateXoriNeuralReply(userText);
+      if (neuralReply) {
+        console.log(`[Xori Neural] primary reply confidence=${neuralReply.confidence.toFixed(3)} model=${neuralReply.model}`);
+        return neuralReply.text;
+      }
+      console.log('[Xori Neural] confidence too low; switching to external model chain.');
+    } catch (err) {
+      console.warn('[Xori Neural] local inference failed; switching to external model chain:', err);
+    }
+  }
+
   const providerOrder = getProviderOrderByTask(taskType);
   if (!hasUsableExternalProvider(taskType)) {
     const localReply = generateInternalHoriThinker(systemPrompt, userText, history, '');
@@ -2176,7 +2194,8 @@ app.get('/api/health', (req, res) => {
     time: new Date().toISOString(),
     offline: OFFLINE_MODE,
     providers: getProviderStatus(),
-    localProvider: 'internal-hori-engine',
+    localProvider: 'xori-neural-v0.1',
+    localNeural: getXoriNeuralStatus(),
     webBrowsing: WEB_SEARCH_ENABLED,
     telegram: Boolean(TELEGRAM_BOT_TOKEN),
     hasGemini: Boolean(process.env.GEMINI_API_KEY),
@@ -2205,6 +2224,7 @@ app.get('/api/autonomy', (req, res) => {
 app.get('/api/providers', (req, res) => {
   res.json({
     offline: OFFLINE_MODE,
+    localNeural: getXoriNeuralStatus(),
     providers: getProviderStatus(),
     hint: OFFLINE_MODE
       ? 'OFFLINE_MODE=true отключает внешние API.'
