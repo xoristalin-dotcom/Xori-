@@ -19,7 +19,8 @@
     "react-dom": "^18.3.1",
     "three": "^0.160.0",
     "ffmpeg-static": "^5.2.0",
-    "node-edge-tts": "^1.2.10"
+    "node-edge-tts": "^1.2.10",
+    "onnxruntime-node": "^1.22.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
