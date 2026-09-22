@@ -1082,6 +1082,14 @@ async function generateTextWithConfiguredProvider(systemPrompt: string, userText
     }
   }
 
+  // No cloud provider left: answer with the built-in deterministic Hori thinker.
+  // This path uses no API key, no paid service, and no external quota.
+  const localReply = generateInternalHoriThinker(enrichedPrompt, userText, history, webContext);
+  if (localReply) {
+    console.warn('[Local fallback] All external providers unavailable; using internal Hori thinker.');
+    return localReply;
+  }
+
   return '';
 }
 
