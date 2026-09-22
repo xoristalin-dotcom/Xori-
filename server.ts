@@ -10,6 +10,7 @@ import { GoogleGenAI } from '@google/genai';
 import { generateXoriNeuralReply, getXoriNeuralStatus } from './xori_neural';
 import { generateXoriLocalReply, getXoriLocalModelStatus } from './xori_gpt';
 import { generateXoriConversationReply, getXoriConversationModelStatus } from './xori_conversation';
+import { generateXoriHfReply, getXoriHfBridgeStatus } from './xori_hf_bridge';
 
 function loadDotEnvFromProjectAndHome() {
   const candidates = [
@@ -49,6 +50,8 @@ const TELEGRAM_PHOTO_URL = process.env.TELEGRAM_PHOTO_URL || '';
 const POLLINATIONS_API_KEY = process.env.POLLINATIONS_API_KEY || '';
 const INTERNAL_LEARNING_ENABLED = process.env.INTERNAL_LEARNING_ENABLED !== 'false';
 const WEB_SEARCH_ENABLED = process.env.WEB_SEARCH_ENABLED !== 'false';
+const XORI_HF_SPACE_URL = process.env.XORI_HF_SPACE_URL || '';
+const XORI_HF_BRIDGE_TOKEN = process.env.XORI_HF_BRIDGE_TOKEN || '';
 let internalReplyCounter = 0;
 const providerCooldowns = new Map<string, number>();
 const providerLastErrors = new Map<string, string>();
@@ -998,11 +1001,24 @@ async function generateTextWithConfiguredProvider(systemPrompt: string, userText
 
   // Primary conversational engine: a pretrained small language model running locally in Node.js.
   // The tiny from-scratch Xori models remain fallbacks while we build the Xori-specific fine-tune.
+  if (taskType !== 'image' && XORI_HF_SPACE_URL) {
+    try {
+      const hfReply = await generateXoriHfReply(systemPrompt, userText, history);
+      if (hfReply?.text) {
+        console.log(`[Xori HF] primary reply model=${hfReply.model}`);
+        return hfReply.text;
+      }
+      console.log('[Xori HF] no usable reply; trying local providers.');
+    } catch (err) {
+      console.warn('[Xori HF] bridge failed; trying local providers:', err);
+    }
+  }
+
   if (taskType !== 'image') {
     try {
       const conversationReply = await generateXoriConversationReply(systemPrompt, userText, history);
       if (conversationReply) {
-        console.log(`[Xori Conversation] primary reply model=${conversationReply.model} dtype=${conversationReply.dtype}`);
+        console.log(`[Xori Conversation] fallback reply model=${conversationReply.model} dtype=${conversationReply.dtype}`);
         return conversationReply.text;
       }
       console.log('[Xori Conversation] no usable reply; trying Xori local GPT.');
@@ -2203,6 +2219,37 @@ function generatePersonaFallback(userMessage: string, emotion: string): { reply:
 // ================= API ROUTES =================
 
 // Health check
+app.post('/api/xori', async (req, res) => {
+  const configuredToken = XORI_HF_BRIDGE_TOKEN;
+  if (configuredToken) {
+    const auth = req.header('authorization') || '';
+    if (auth !== `Bearer ${configuredToken}`) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+  }
+
+  const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+  const history = Array.isArray(req.body?.history) ? req.body.history : [];
+  const systemPrompt = typeof req.body?.systemPrompt === 'string' ? req.body.systemPrompt : buildSystemPrompt();
+
+  if (!message) return res.status(400).json({ error: 'message is required' });
+  if (!XORI_HF_SPACE_URL) {
+    return res.status(503).json({ error: 'XORI_HF_SPACE_URL is not configured' });
+  }
+
+  try {
+    const result = await generateXoriHfReply(systemPrompt, message, history);
+    if (!result?.text) return res.status(502).json({ error: 'Hugging Face model returned an empty response' });
+    return res.json({ reply: result.text, model: result.model, provider: 'huggingface-space' });
+  } catch (error) {
+    console.error('[Xori HF bridge] request failed:', error);
+    return res.status(502).json({
+      error: 'Hugging Face model is unavailable',
+      detail: error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
+    });
+  }
+});
+
 app.get('/api/health', (req, res) => {
   const memory = ensureMemoryState(loadJson<any>(MEMORY_PATH, {
     user_name: 'мой любимый',
@@ -2222,6 +2269,7 @@ app.get('/api/health', (req, res) => {
     providers: getProviderStatus(),
     localProvider: 'xori-conversation + xori-local-gpt + xori-neural-v0.1',
     conversationModel: getXoriConversationModelStatus(),
+    huggingFaceBridge: getXoriHfBridgeStatus(),
     localModel: getXoriLocalModelStatus(),
     localNeural: getXoriNeuralStatus(),
     webBrowsing: WEB_SEARCH_ENABLED,
