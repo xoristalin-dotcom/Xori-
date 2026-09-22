@@ -2053,3 +2053,15 @@ app.post('/api/chat', async (req, res) => {
     reply,
     emotion,
     animation,
+  });
+});
+
+const distPath = path.join(BASE_DIR, 'dist');
+app.use(express.static(distPath));
+app.get('*', (req, res) => {
+  res.sendFile(path.join(distPath, 'index.html'));
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Hori server listening on port ${PORT}`);
+});
