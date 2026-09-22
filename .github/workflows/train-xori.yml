@@ -68,10 +68,16 @@ jobs:
         run: |
           git config user.name "xori-cloud-trainer[bot]"
           git config user.email "xori-cloud-trainer[bot]@users.noreply.github.com"
-          git add xori_model/model.onnx xori_model/vocab.json xori_model/config.json
+
+          # The model artifacts are intentionally generated files, so .gitignore
+          # excludes them locally. Force-add them here so the free cloud trainer
+          # can deliver the trained model back into the repository automatically.
+          git add -f xori_model/model.onnx xori_model/vocab.json xori_model/config.json
+
           if git diff --cached --quiet; then
             echo "No model changes to commit."
             exit 0
           fi
+
           git commit -m "Train Xori cloud model"
           git push
