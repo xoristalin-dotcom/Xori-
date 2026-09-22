@@ -1,0 +1,70 @@
+openapi: 3.0.3
+info:
+  title: Xori Remote Model API
+  version: 1.0.0
+  description: Lightweight Render bridge to the Xori model hosted outside Render.
+servers:
+  - url: https://telegramxor.onrender.com
+paths:
+  /api/xori:
+    post:
+      operationId: generateXoriReply
+      summary: Generate a reply with the remote Xori model
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/XoriRequest'
+      responses:
+        '200':
+          description: Generated reply
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/XoriResponse'
+        '400':
+          description: Invalid request
+        '401':
+          description: Invalid bridge token
+        '502':
+          description: Hugging Face model unavailable
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    XoriRequest:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          maxLength: 12000
+        systemPrompt:
+          type: string
+        history:
+          type: array
+          maxItems: 8
+          items:
+            type: object
+            properties:
+              sender:
+                type: string
+              text:
+                type: string
+    XoriResponse:
+      type: object
+      required:
+        - reply
+      properties:
+        reply:
+          type: string
+        model:
+          type: string
+        provider:
+          type: string
