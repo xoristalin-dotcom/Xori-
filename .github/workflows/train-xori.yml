@@ -1,0 +1,77 @@
+name: Train Xori Cloud Model
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "xori_dataset.jsonl"
+      - "train/**"
+      - ".github/workflows/train-xori.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: xori-training
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout Xori
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install training dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install onnx
+
+      - name: Train Xori
+        env:
+          XORI_EPOCHS: "25"
+          XORI_MAX_LEN: "256"
+          XORI_D_MODEL: "128"
+          XORI_N_HEADS: "4"
+          XORI_N_LAYERS: "4"
+        run: python train/train_xori.py
+
+      - name: Validate exported model
+        run: |
+          python - <<'PY'
+          import json
+          import onnx
+          from pathlib import Path
+
+          root = Path("xori_model")
+          for name in ("model.onnx", "vocab.json", "config.json"):
+              p = root / name
+              assert p.exists() and p.stat().st_size > 0, f"missing {p}"
+
+          onnx.checker.check_model(onnx.load(root / "model.onnx"))
+          config = json.loads((root / "config.json").read_text())
+          assert config["trainedBy"] == "GitHub Actions cloud trainer"
+          print("Xori model validation passed")
+          PY
+
+      - name: Commit trained model
+        run: |
+          git config user.name "xori-cloud-trainer[bot]"
+          git config user.email "xori-cloud-trainer[bot]@users.noreply.github.com"
+          git add xori_model/model.onnx xori_model/vocab.json xori_model/config.json
+          if git diff --cached --quiet; then
+            echo "No model changes to commit."
+            exit 0
+          fi
+          git commit -m "Train Xori cloud model"
+          git push
