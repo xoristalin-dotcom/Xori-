@@ -9,6 +9,7 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import { generateXoriNeuralReply, getXoriNeuralStatus } from './xori_neural';
 import { generateXoriLocalReply, getXoriLocalModelStatus } from './xori_gpt';
+import { generateXoriConversationReply, getXoriConversationModelStatus } from './xori_conversation';
 
 function loadDotEnvFromProjectAndHome() {
   const candidates = [
@@ -994,6 +995,21 @@ function generateInternalHoriThinker(systemPrompt: string, userText: string, his
 
 async function generateTextWithConfiguredProvider(systemPrompt: string, userText: string, history: any[] = []) {
   const taskType = detectTaskType(userText);
+
+  // Primary conversational engine: a pretrained small language model running locally in Node.js.
+  // The tiny from-scratch Xori models remain fallbacks while we build the Xori-specific fine-tune.
+  if (taskType !== 'image') {
+    try {
+      const conversationReply = await generateXoriConversationReply(systemPrompt, userText, history);
+      if (conversationReply) {
+        console.log(`[Xori Conversation] primary reply model=${conversationReply.model} dtype=${conversationReply.dtype}`);
+        return conversationReply.text;
+      }
+      console.log('[Xori Conversation] no usable reply; trying Xori local GPT.');
+    } catch (err) {
+      console.warn('[Xori Conversation] local generator failed; trying Xori local GPT:', err);
+    }
+  }
 
   // Colab-trained Xori GPT is the primary generative model.
   if (taskType !== 'image') {
@@ -2204,7 +2220,8 @@ app.get('/api/health', (req, res) => {
     time: new Date().toISOString(),
     offline: OFFLINE_MODE,
     providers: getProviderStatus(),
-    localProvider: 'xori-local-gpt + xori-neural-v0.1',
+    localProvider: 'xori-conversation + xori-local-gpt + xori-neural-v0.1',
+    conversationModel: getXoriConversationModelStatus(),
     localModel: getXoriLocalModelStatus(),
     localNeural: getXoriNeuralStatus(),
     webBrowsing: WEB_SEARCH_ENABLED,
