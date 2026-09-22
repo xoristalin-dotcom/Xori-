@@ -310,7 +310,15 @@ function getProviderOrderByTask(taskType: string) {
       apiKey: process.env.OPENROUTER_API_KEY,
       baseUrl: 'https://openrouter.ai/api/v1',
       model: process.env.OPENROUTER_MODEL || 'openrouter/free',
-      label: 'OpenRouter',
+      label: 'OpenRouter Free',
+      kind: 'openrouter-free',
+    },
+    {
+      enabled: Boolean(process.env.OPENROUTER_API_KEY),
+      apiKey: process.env.OPENROUTER_API_KEY,
+      baseUrl: 'https://openrouter.ai/api/v1',
+      model: process.env.OPENROUTER_MODEL_PAID || 'openrouter/free',
+      label: 'OpenRouter fallback',
       kind: 'cloud',
     },
     {
@@ -340,8 +348,8 @@ function getProviderOrderByTask(taskType: string) {
   ];
 
   const weights: Record<string, string[]> = {
-    // Main chat: Kimi K2.5 -> DeepSeek.
-    generic: ['pollinations-kimi', 'pollinations-deepseek', 'gemini', 'cloud'],
+    // Main chat: free OpenRouter router first, then other providers as fallbacks.
+    generic: ['openrouter-free', 'pollinations-kimi', 'pollinations-deepseek', 'gemini', 'cloud'],
     // Requested specialized elements.
     logic: ['pollinations-glm', 'pollinations-kimi', 'gemini', 'cloud'],
     search: ['pollinations-gemini-search', 'gemini', 'pollinations-kimi', 'cloud'],
