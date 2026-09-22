@@ -1292,13 +1292,28 @@ async function handleTelegramMessage(chatId: number, text: string, history: any[
   if (warning) return warning;
   if (!cleanText) return 'Напиши мне что-нибудь.';
 
+  const memory = ensureMemoryState(loadJson<any>(MEMORY_PATH, {
+    user_name: 'мой хороший',
+    facts: [], conversations: [], interests: [], current_topics: [],
+    inner_thoughts: [], reflection_log: [], mood: 'спокойное', emotion: 'calm', energy: 72,
+    last_interaction: new Date().toISOString(), proactive_sent: [], last_chat_id: null,
+  }));
+
   if (isPhotoRequest(cleanText)) {
-    const visualReference = isHoriSelfPhotoRequest(cleanText)
-      ? await fetchHoriVisualReference()
-      : '';
+    const visualReference = isHoriSelfPhotoRequest(cleanText) ? await fetchHoriVisualReference() : '';
     const imagePrompt = buildImagePrompt(cleanText, visualReference);
     const sent = await sendTelegramPhoto(chatId, imagePrompt, 'Вот, держи 🎨');
-    if (sent) return '';
+    if (sent) {
+      memory.last_chat_id = chatId;
+      memory.last_interaction = new Date().toISOString();
+      const decision: HoriDecision = {
+        action: 'reply', format: 'photo', askQuestion: false, continueTopic: true,
+        sendImage: true, sendVoice: false, reason: 'explicit-photo-request', confidence: 0.99,
+      };
+      updateConversationState(memory, cleanText, '[photo]', decision);
+      saveJson(MEMORY_PATH, memory);
+      return '';
+    }
     return 'Я попробовала сгенерировать изображение, но Pollinations или Telegram не приняли картинку. Проверь логи — я записала точную причину.';
   }
 
@@ -1309,34 +1324,68 @@ async function handleTelegramMessage(chatId: number, text: string, history: any[
     console.warn('Telegram AI error:', err);
   }
   if (!reply) return 'Я не могу ответить: все API-провайдеры сейчас недоступны. Проверь ключи в Render.';
-  if (isVoiceRequest(cleanText) && !TELEGRAM_VOICE_URL) {
-    reply += '\n\nЯ могу прислать голосовое, но для этого нужен TELEGRAM_VOICE_URL с аудиофайлом .ogg или .mp3.';
+
+  const decision = decideHoriAction(cleanText, reply, memory);
+
+  // A natural conversation can occasionally have no response.
+  if (decision.action === 'ignore') {
+    memory.last_chat_id = chatId;
+    memory.last_interaction = new Date().toISOString();
+    updateConversationState(memory, cleanText, '', decision);
+    saveJson(MEMORY_PATH, memory);
+    return '';
   }
 
-  const memory = ensureMemoryState(loadJson<any>(MEMORY_PATH, {
-    user_name: 'мой любимый', facts: [], conversations: [], interests: [], current_topics: [],
-    inner_thoughts: [], reflection_log: [], mood: 'спокойное', emotion: 'calm', energy: 72,
-    last_interaction: new Date().toISOString(), proactive_sent: [], last_chat_id: null,
-  }));
+  // Let the agent continue the topic instead of forcing a question every time.
+  let finalReply = reply;
+  if (decision.askQuestion && !/[?？]\\s*$/.test(finalReply)) {
+    try {
+      const followUpPrompt = `${buildSystemPrompt()}
+Только что ты ответила:
+"${finalReply}"
+Добавь в конце ОДИН естественный короткий вопрос, который продолжает именно эту тему.
+Не меняй смысл предыдущего ответа и не задавай формальный вопрос "Чем могу помочь?".
+Верни весь итоговый ответ целиком.`;
+      const continued = await generateTextWithConfiguredProvider(followUpPrompt, cleanText, history);
+      if (continued) finalReply = continued;
+    } catch (err) {
+      console.warn('Follow-up generation failed:', err);
+    }
+  }
+
+  memory.last_chat_id = chatId;
+  memory.last_interaction = new Date().toISOString();
   const updatedMemory = updateMemoryFromUserMessage(cleanText, memory);
   const reflectedMemory = await syncInnerMonologue(cleanText, updatedMemory, history);
   reflectedMemory.last_chat_id = chatId;
+
   const lastConversation = reflectedMemory.conversations[reflectedMemory.conversations.length - 1];
   if (lastConversation?.user === cleanText && !lastConversation.hori) {
-    lastConversation.hori = reply;
+    lastConversation.hori = finalReply;
   } else {
     reflectedMemory.conversations = [...reflectedMemory.conversations, {
-      user: cleanText, hori: reply, time: new Date().toISOString(),
+      user: cleanText, hori: finalReply, time: new Date().toISOString(),
     }].slice(-40);
   }
+
   reflectedMemory.mood = reflectedMemory.emotion === 'happy' ? 'весёлое'
     : reflectedMemory.emotion === 'sad' ? 'сдержанное'
     : reflectedMemory.emotion === 'angry' ? 'поджатое' : 'спокойное';
-  saveJson(MEMORY_PATH, reflectedMemory);
-  if (isVoiceRequest(cleanText)) {
-    await sendTelegramVoice(chatId, reply).catch((err) => console.warn('Telegram voice failed:', err));
+
+  updateConversationState(reflectedMemory, cleanText, finalReply, decision);
+  saveTrainingExample(cleanText, finalReply, false);
+
+  if (decision.sendVoice && TELEGRAM_VOICE_URL) {
+    await sendTelegramVoice(chatId, finalReply).catch((err) => console.warn('Telegram voice failed:', err));
   }
-  return reply;
+
+  if (decision.sendImage) {
+    const visualReference = isHoriSelfPhotoRequest(cleanText) ? await fetchHoriVisualReference() : '';
+    const imagePrompt = buildImagePrompt(cleanText, visualReference);
+    await sendTelegramPhoto(chatId, imagePrompt, '').catch((err) => console.warn('Contextual Telegram photo failed:', err));
+  }
+
+  return finalReply;
 }
 
 async function startTelegramPolling() {
@@ -1654,18 +1703,125 @@ function buildProactiveMessage(memory: any): string {
     : alternatives[variation];
 }
 
+type HoriDecision = {
+  action: 'reply' | 'ignore';
+  format: 'text' | 'voice' | 'photo' | 'text+voice' | 'text+photo';
+  askQuestion: boolean;
+  continueTopic: boolean;
+  sendImage: boolean;
+  sendVoice: boolean;
+  reason: string;
+  confidence: number;
+};
+
+function getConversationState(memory: any): any {
+  if (!memory.conversation_state || typeof memory.conversation_state !== 'object') {
+    memory.conversation_state = {
+      topic: '',
+      open_questions: [],
+      conversation_energy: 50,
+      last_user_text: '',
+      last_hori_text: '',
+      last_format: 'text',
+      last_decision_at: null,
+    };
+  }
+  return memory.conversation_state;
+}
+
+function hasExplicitRequest(text: string): boolean {
+  return /(?:ответь|скажи|расскажи|объясни|помоги|пришли|покажи|отправь|сгенерируй|нарисуй|озвучь|голосом|фото|фотку|селфи|картинк|изображен)/i.test(text);
+}
+
+function shouldAskFollowUp(text: string, reply: string, state: any): boolean {
+  if (reply.length < 45) return false;
+  if (/[?？]\\s*$/.test(reply)) return false;
+  if (/(?:как ты|что думаешь|что дальше|расскажи|а ты|почему|зачем)/i.test(text)) return true;
+  if (state.open_questions?.length) return true;
+  return Math.random() < 0.28;
+}
+
+function decideHoriAction(text: string, reply: string, memory: any, options: { proactive?: boolean } = {}): HoriDecision {
+  const state = getConversationState(memory);
+  const lower = text.toLowerCase();
+  const explicit = hasExplicitRequest(text);
+  const emotional = /(груст|устал|тревож|страш|плохо|одиноко|рад|счастлив|смешно|класс|ура|волнуюсь|пережива)/i.test(lower);
+  const visualMoment = /(смотри|представь|покажу|покажи|видел|видела|сегодня|сейчас|на улице|дома|образ|наряд|пейзаж|рисунок|внешност)/i.test(lower);
+  const wantsVoice = isVoiceRequest(text);
+  const wantsPhoto = isPhotoRequest(text);
+  const recentVoice = state.last_format === 'voice';
+  const recentPhoto = state.last_format === 'photo' || state.last_format === 'text+photo';
+
+  if (options.proactive) {
+    const quietHours = (() => {
+      const hour = new Date().getHours();
+      return hour >= 1 || hour < 8;
+    })();
+    if (quietHours) {
+      return { action: 'ignore', format: 'text', askQuestion: false, continueTopic: false, sendImage: false, sendVoice: false, reason: 'quiet-hours', confidence: 0.96 };
+    }
+    if (Math.random() < 0.38) {
+      return { action: 'ignore', format: 'text', askQuestion: false, continueTopic: false, sendImage: false, sendVoice: false, reason: 'no-natural-reason-to-interrupt', confidence: 0.62 };
+    }
+  }
+
+  if (!explicit && !reply && !options.proactive) {
+    return { action: 'ignore', format: 'text', askQuestion: false, continueTopic: false, sendImage: false, sendVoice: false, reason: 'empty-response', confidence: 0.9 };
+  }
+
+  const sendImage = wantsPhoto || (!wantsPhoto && visualMoment && !recentPhoto && Math.random() < 0.10);
+  const sendVoice = wantsVoice || (!wantsVoice && emotional && !recentVoice && Math.random() < 0.16);
+
+  let format: HoriDecision['format'] = 'text';
+  if (sendImage && sendVoice) format = 'text+voice';
+  else if (sendImage) format = 'text+photo';
+  else if (sendVoice) format = 'voice';
+
+  const askQuestion = shouldAskFollowUp(text, reply, state);
+  const continueTopic = askQuestion || Boolean(state.topic) || emotional;
+
+  // Explicit user requests are always answered; otherwise low-signal messages may be skipped.
+  if (!explicit && !options.proactive && reply.length < 12 && Math.random() < 0.35) {
+    return { action: 'ignore', format: 'text', askQuestion: false, continueTopic: false, sendImage: false, sendVoice: false, reason: 'low-signal', confidence: 0.58 };
+  }
+
+  return {
+    action: 'reply',
+    format,
+    askQuestion,
+    continueTopic,
+    sendImage,
+    sendVoice,
+    reason: explicit ? 'explicit-request' : emotional ? 'emotional-context' : visualMoment ? 'contextual-multimodal' : 'natural-conversation',
+    confidence: explicit ? 0.98 : 0.72,
+  };
+}
+
+function updateConversationState(memory: any, userText: string, reply: string, decision: HoriDecision) {
+  const state = getConversationState(memory);
+  const topic = getWebSearchKeywords(userText).slice(0, 3).join(' ');
+  state.topic = topic || state.topic || '';
+  state.last_user_text = userText.slice(0, 500);
+  state.last_hori_text = reply.slice(0, 800);
+  state.last_format = decision.format;
+  state.last_decision_at = new Date().toISOString();
+  state.conversation_energy = Math.max(0, Math.min(100,
+    state.conversation_energy + (decision.askQuestion ? 7 : -2) + (decision.action === 'ignore' ? -10 : 4)
+  ));
+  state.open_questions = decision.askQuestion ? [reply.slice(-240)] : (state.open_questions || []).slice(0, 2);
+}
+
 async function maybeSendProactiveTelegramMessage() {
   if (!TELEGRAM_BOT_TOKEN) return;
 
   const memory = ensureMemoryState(loadJson<any>(MEMORY_PATH, {
-    user_name: 'мой любимый',
+    user_name: 'мой хороший',
     facts: [],
     interests: [],
     conversations: [],
     mood: 'спокойное',
     emotion: 'calm',
     energy: 72,
-    last_interaction: new Date().toISOString(),
     proactive_sent: [],
     last_chat_id: null,
     next_proactive_at: null,
@@ -1673,88 +1829,67 @@ async function maybeSendProactiveTelegramMessage() {
   }));
 
   const now = Date.now();
+  const lastInteraction = memory.last_interaction ? new Date(memory.last_interaction).getTime() : now;
+  const lastProactive = memory.last_proactive_message ? new Date(memory.last_proactive_message).getTime() : 0;
 
-  const lastInteraction = memory.last_interaction
-    ? new Date(memory.last_interaction).getTime()
-    : now;
-
-  const lastProactive = memory.last_proactive_message
-    ? new Date(memory.last_proactive_message).getTime()
-    : 0;
-
-  // Не писать чаще одного раза в 6 часов
-  if (
-    lastProactive &&
-    now - lastProactive < 6 * 60 * 60 * 1000
-  ) {
-    return;
-  }
-
+  // Hard safety/anti-spam guard: no proactive message more often than every 6 hours.
+  if (lastProactive && now - lastProactive < 6 * 60 * 60 * 1000) return;
   if (!memory.last_chat_id) return;
 
-  // Хори сама выбирает время ожидания: 4–12 часов
   if (!memory.next_proactive_at) {
-    const delay =
-      4 * 60 * 60 * 1000 +
-      Math.random() * (8 * 60 * 60 * 1000);
-
-    memory.next_proactive_at = new Date(
-      lastInteraction + delay
-    ).toISOString();
-
+    const delay = 4 * 60 * 60 * 1000 + Math.random() * (8 * 60 * 60 * 1000);
+    memory.next_proactive_at = new Date(Math.max(lastInteraction, now) + delay).toISOString();
     saveJson(MEMORY_PATH, memory);
     return;
   }
 
-  const nextTime = new Date(
-    memory.next_proactive_at
-  ).getTime();
+  if (now < new Date(memory.next_proactive_at).getTime()) return;
 
-  if (now < nextTime) return;
+  const prompt = buildProactiveMessage(memory);
+  let proactiveText = '';
+  try {
+    proactiveText = await generateTextWithConfiguredProvider(buildSystemPrompt(), prompt, []);
+  } catch (err) {
+    console.warn('Proactive generation failed:', err);
+  }
 
-  const proactiveText =
-    await generateTextWithConfiguredProvider(
-      buildSystemPrompt(),
-      buildProactiveMessage(memory),
-      []
-    );
+  const finalText = proactiveText || buildProactiveMessage(memory);
+  const decision = decideHoriAction('', finalText, memory, { proactive: true });
 
-  const finalText =
-    proactiveText || buildProactiveMessage(memory);
+  // The agent is allowed to decide that there is no natural reason to interrupt.
+  if (decision.action === 'ignore') {
+    memory.next_proactive_at = new Date(now + 2 * 60 * 60 * 1000 + Math.random() * 4 * 60 * 60 * 1000).toISOString();
+    saveJson(MEMORY_PATH, memory);
+    return;
+  }
 
   try {
-    await telegramRequest('sendMessage', {
-      chat_id: Number(memory.last_chat_id),
-      text: finalText,
-    });
+    const chatId = Number(memory.last_chat_id);
+    await sendTelegramReply(chatId, finalText);
 
-    memory.last_proactive_message =
-      new Date().toISOString();
+    if (decision.sendVoice && TELEGRAM_VOICE_URL) {
+      await sendTelegramVoice(chatId, finalText).catch((err) => console.warn('Proactive voice failed:', err));
+    }
+    if (decision.sendImage) {
+      const visualReference = isHoriSelfPhotoRequest(finalText) ? await fetchHoriVisualReference() : '';
+      const imagePrompt = buildImagePrompt(finalText, visualReference);
+      await sendTelegramPhoto(chatId, imagePrompt, '').catch((err) => console.warn('Proactive photo failed:', err));
+    }
 
-    memory.next_proactive_at = new Date(
-      now +
-      6 * 60 * 60 * 1000 +
-      Math.random() * (12 * 60 * 60 * 1000)
-    ).toISOString();
-
-    memory.proactive_sent = Array.isArray(
-      memory.proactive_sent
-    )
-      ? memory.proactive_sent
-      : [];
-
+    memory.last_proactive_message = new Date().toISOString();
+    memory.next_proactive_at = new Date(now + 6 * 60 * 60 * 1000 + Math.random() * 12 * 60 * 60 * 1000).toISOString();
+    memory.proactive_sent = Array.isArray(memory.proactive_sent) ? memory.proactive_sent : [];
     memory.proactive_sent.push({
       text: finalText,
+      format: decision.format,
+      reason: decision.reason,
       time: new Date().toISOString(),
     });
-
+    memory.proactive_sent = memory.proactive_sent.slice(-50);
+    updateConversationState(memory, '', finalText, decision);
     saveJson(MEMORY_PATH, memory);
-
   } catch (err) {
-    console.warn(
-      'Proactive Telegram message failed:',
-      err
-    );
+    console.warn('Proactive Telegram message failed:', err);
   }
 }
 
@@ -1933,6 +2068,21 @@ app.get('/api/health', (req, res) => {
     mood: memory.mood,
     energy: memory.energy,
     autonomy: true,
+  });
+});
+
+app.get('/api/autonomy', (req, res) => {
+  const memory = ensureMemoryState(loadJson<any>(MEMORY_PATH, {}));
+  const state = getConversationState(memory);
+  res.json({
+    ok: true,
+    autonomy: true,
+    proactive: Boolean(TELEGRAM_BOT_TOKEN && memory.last_chat_id),
+    next_proactive_at: memory.next_proactive_at || null,
+    last_proactive_message: memory.last_proactive_message || null,
+    conversation_state: state,
+    telegram_voice_configured: Boolean(TELEGRAM_VOICE_URL),
+    pollinations_image_configured: Boolean(POLLINATIONS_API_KEY),
   });
 });
 
