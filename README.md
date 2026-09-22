@@ -69,3 +69,35 @@ curl https://<имя-сервиса>.onrender.com/api/health
 | `hori_knowledge.json` | Факты о Хори и мире Horimiya |
 | `hori_photos/` | Оригинальные изображения Хори по настроению |
 | `render.yaml` | Конфиг деплоя на Render |
+
+
+## Архитектура удалённого мозга Xori
+
+Xori теперь умеет работать по схеме **Render bridge → Hugging Face Space**. Render принимает Telegram/API-запрос, но не обязан загружать тяжёлые веса разговорной модели. Если задан `XORI_HF_SPACE_URL`, удалённая модель становится первым маршрутом генерации; локальные модели остаются резервом.
+
+В репозитории подготовлен шаблон Space в `hf_space/`:
+- `hf_space/app.py` — Gradio API с endpoint `generate`;
+- `hf_space/requirements.txt` — зависимости;
+- `hf_space/README.md` — конфигурация Space.
+
+Hugging Face Spaces поддерживает именованные Gradio API endpoints, а API можно вызывать через `/gradio_api/call/<endpoint>`. urlДокументация Hugging Face Spaces APIhttps://huggingface.co/docs/hub/spaces-overview
+
+Для бесплатного ZeroGPU есть ограничения по квоте и условиям аккаунта, поэтому ZeroGPU не следует считать безлимитным постоянным GPU. urlДокументация Hugging Face ZeroGPUhttps://huggingface.co/docs/hub/spaces-zerogpu
+
+### Переменные Render
+
+Установи:
+```text
+XORI_HF_SPACE_URL=https://<namespace>-<space>.hf.space
+XORI_HF_ENDPOINT=generate
+XORI_HF_MODEL_ID=<namespace>/<model-repo>
+XORI_HF_BRIDGE_TOKEN=<случайный-секрет>
+```
+
+Тот же `XORI_HF_BRIDGE_TOKEN` должен использоваться клиентом, который вызывает `/api/xori`. Сам токен не добавляй в Git.
+
+OpenAPI-схема для клиента находится в `docs/xori-openapi.yaml`.
+
+### Хранение модели
+
+Если модель нужно автоматически отправлять из GitHub Actions в Hugging Face Hub, используй GitHub Secret `HF_TOKEN` с правом записи и репозиторий модели вроде `Abobus2222228/Xoritg`. Hugging Face официально поддерживает `create_repo` и `upload_folder` для такой схемы. 
