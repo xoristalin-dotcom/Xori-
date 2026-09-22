@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import { generateXoriNeuralReply, getXoriNeuralStatus } from './xori_neural';
+import { generateXoriLocalReply, getXoriLocalModelStatus } from './xori_gpt';
 
 function loadDotEnvFromProjectAndHome() {
   const candidates = [
@@ -994,14 +995,23 @@ function generateInternalHoriThinker(systemPrompt: string, userText: string, his
 async function generateTextWithConfiguredProvider(systemPrompt: string, userText: string, history: any[] = []) {
   const taskType = detectTaskType(userText);
 
-  // Xori Neural is the first responder. It runs locally with no API key or quota.
-  // It only answers when its confidence is high enough; otherwise the request
-  // continues through the external model chain below.
+  // Colab-trained Xori GPT is the primary generative model.
   if (taskType !== 'image') {
+    try {
+      const localReply = await generateXoriLocalReply(userText, history);
+      if (localReply) {
+        console.log(`[Xori Local GPT] primary reply model=${localReply.model}`);
+        return localReply.text;
+      }
+      console.log('[Xori Local GPT] model files are missing or generation was unavailable; trying Xori Neural.');
+    } catch (err) {
+      console.warn('[Xori Local GPT] local inference failed; trying Xori Neural:', err);
+    }
+
     try {
       const neuralReply = generateXoriNeuralReply(userText);
       if (neuralReply) {
-        console.log(`[Xori Neural] primary reply confidence=${neuralReply.confidence.toFixed(3)} model=${neuralReply.model}`);
+        console.log(`[Xori Neural] secondary local reply confidence=${neuralReply.confidence.toFixed(3)} model=${neuralReply.model}`);
         return neuralReply.text;
       }
       console.log('[Xori Neural] confidence too low; switching to external model chain.');
@@ -2194,7 +2204,8 @@ app.get('/api/health', (req, res) => {
     time: new Date().toISOString(),
     offline: OFFLINE_MODE,
     providers: getProviderStatus(),
-    localProvider: 'xori-neural-v0.1',
+    localProvider: 'xori-local-gpt + xori-neural-v0.1',
+    localModel: getXoriLocalModelStatus(),
     localNeural: getXoriNeuralStatus(),
     webBrowsing: WEB_SEARCH_ENABLED,
     telegram: Boolean(TELEGRAM_BOT_TOKEN),
