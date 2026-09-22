@@ -17,7 +17,8 @@
     "motion": "^11.13.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "three": "^0.160.0"
+    "three": "^0.160.0",
+    "ffmpeg-static": "^5.2.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
