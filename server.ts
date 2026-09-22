@@ -263,14 +263,6 @@ function getProviderOrderByTask(taskType: string) {
       enabled: Boolean(process.env.POLLINATIONS_API_KEY),
       apiKey: process.env.POLLINATIONS_API_KEY,
       baseUrl: 'https://gen.pollinations.ai/v1',
-      model: process.env.POLLINATIONS_KIMI_MODEL || 'kimi',
-      label: 'Pollinations Kimi K2.5',
-      kind: 'pollinations-kimi',
-    },
-    {
-      enabled: Boolean(process.env.POLLINATIONS_API_KEY),
-      apiKey: process.env.POLLINATIONS_API_KEY,
-      baseUrl: 'https://gen.pollinations.ai/v1',
       model: process.env.POLLINATIONS_DEEPSEEK_MODEL || 'deepseek',
       label: 'Pollinations DeepSeek',
       kind: 'pollinations-deepseek',
@@ -350,17 +342,17 @@ function getProviderOrderByTask(taskType: string) {
   ];
 
   const weights: Record<string, string[]> = {
-    generic: ['pollinations-kimi', 'pollinations-deepseek', 'pollinations-glm', 'gemini', 'openrouter-free', 'pollinations-claude-fast', 'pollinations-gemini-search', 'cloud'],
-    logic: ['pollinations-glm', 'pollinations-deepseek', 'gemini', 'pollinations-kimi', 'openrouter-free', 'cloud'],
-    search: ['pollinations-gemini-search', 'gemini', 'pollinations-kimi', 'pollinations-deepseek', 'openrouter-free', 'cloud'],
-    fast: ['pollinations-claude-fast', 'gemini', 'pollinations-kimi', 'openrouter-free', 'cloud'],
-    learning: ['pollinations-kimi', 'gemini', 'pollinations-deepseek', 'pollinations-glm', 'openrouter-free', 'cloud'],
-    error: ['pollinations-deepseek', 'gemini', 'pollinations-kimi', 'pollinations-glm', 'openrouter-free', 'cloud'],
-    coding: ['pollinations-deepseek', 'gemini', 'pollinations-kimi', 'pollinations-glm', 'openrouter-free', 'cloud'],
-    math: ['pollinations-glm', 'gemini', 'pollinations-deepseek', 'pollinations-kimi', 'openrouter-free', 'cloud'],
-    creative: ['pollinations-kimi', 'gemini', 'pollinations-claude-fast', 'pollinations-glm', 'openrouter-free', 'cloud'],
-    emotional: ['pollinations-kimi', 'gemini', 'pollinations-claude-fast', 'pollinations-deepseek', 'openrouter-free', 'cloud'],
-    long: ['pollinations-kimi', 'gemini', 'pollinations-deepseek', 'pollinations-glm', 'openrouter-free', 'cloud'],
+    generic: ['pollinations-deepseek', 'pollinations-glm', 'gemini', 'openrouter-free', 'pollinations-claude-fast', 'pollinations-gemini-search', 'cloud'],
+    logic: ['pollinations-glm', 'pollinations-deepseek', 'gemini', 'openrouter-free', 'cloud'],
+    search: ['pollinations-gemini-search', 'gemini', 'pollinations-deepseek', 'openrouter-free', 'cloud'],
+    fast: ['pollinations-claude-fast', 'gemini', 'openrouter-free', 'cloud'],
+    learning: ['gemini', 'pollinations-deepseek', 'pollinations-glm', 'openrouter-free', 'cloud'],
+    error: ['pollinations-deepseek', 'gemini', 'pollinations-glm', 'openrouter-free', 'cloud'],
+    coding: ['pollinations-deepseek', 'gemini', 'pollinations-glm', 'openrouter-free', 'cloud'],
+    math: ['pollinations-glm', 'gemini', 'pollinations-deepseek', 'openrouter-free', 'cloud'],
+    creative: ['gemini', 'pollinations-claude-fast', 'pollinations-glm', 'openrouter-free', 'cloud'],
+    emotional: ['gemini', 'pollinations-claude-fast', 'pollinations-deepseek', 'openrouter-free', 'cloud'],
+    long: ['gemini', 'pollinations-deepseek', 'pollinations-glm', 'openrouter-free', 'cloud'],
     image: [],
   };
 
@@ -1089,7 +1081,7 @@ async function generateTextWithConfiguredProvider(systemPrompt: string, userText
       }
     } catch (err) {
       markProviderFailure(provider, err);
-      console.warn(`${provider.label} call failed:`, err);
+      console.warn(`[Model switch] ${provider.label} failed; switching to next provider:`, err);
     }
   }
 
