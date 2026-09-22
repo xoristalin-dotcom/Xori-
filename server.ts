@@ -1570,38 +1570,28 @@ async function startTelegramPolling() {
   ]).filter(Boolean) as Array<{ sender: 'user' | 'hori'; text: string }>;
   const histories = new Map<number, Array<{ sender: 'user' | 'hori'; text: string }>>();
 
-  // Use one controlled long-polling loop instead of the webhook.
-  // The webhook was being registered successfully, but Render showed no incoming
-  // webhook requests after deployment. We explicitly remove any old webhook first
-  // so Telegram cannot split delivery between webhook and getUpdates.
-  await telegramRequest('deleteWebhook', { drop_pending_updates: false });
-  const webhookInfo = await telegramRequest('getWebhookInfo');
-  console.log('Telegram webhook cleared: ' + JSON.stringify(webhookInfo || {}));
-
-  const bot = await telegramRequest('getMe');
-  console.log('Telegram long polling enabled for @' + (bot?.username || 'bot'));
-
-  let offset = 0;
-  const poll = async () => {
+  // Telegram must have exactly one delivery mode. We use webhook on Render.
+  // A separate old getUpdates process was still running and caused 409 conflicts.
+  // Reasserting the webhook periodically prevents another process from silently
+  // taking the bot back to polling mode.
+  const webhookUrl = publicUrl + '/telegram/webhook';
+  const ensureWebhook = async () => {
     try {
-      const updates = (await telegramRequest('getUpdates', {
-        offset,
-        timeout: 25,
+      await telegramRequest('setWebhook', {
+        url: webhookUrl,
+        drop_pending_updates: false,
         allowed_updates: ['message'],
-      })) as TelegramUpdate[];
-
-      for (const update of updates || []) {
-        offset = update.update_id + 1;
-        await processTelegramUpdate(update, histories, savedHistory, savedMemory);
-      }
+      });
+      const info = await telegramRequest('getWebhookInfo');
+      console.log('Telegram webhook active: ' + webhookUrl + ' pending=' + (info?.pending_update_count ?? 0));
     } catch (err) {
-      console.error('Telegram polling error:', err);
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+      console.error('Telegram webhook setup error:', err);
     }
-    void poll();
   };
 
-  void poll();
+  await ensureWebhook();
+  setInterval(() => { void ensureWebhook(); }, 30_000);
+  return;
 }
 
 // Safety & Emotion Detection from safety.py
