@@ -1472,23 +1472,49 @@ async function handleTelegramMessage(chatId: number, text: string, history: any[
   return finalReply;
 }
 
+async function processTelegramUpdate(update: TelegramUpdate, histories: Map<number, Array<{ sender: 'user' | 'hori'; text: string }>>, savedHistory: Array<{ sender: 'user' | 'hori'; text: string }>, savedMemory: any) {
+  const chatId = update.message?.chat?.id;
+  const text = update.message?.text?.trim();
+  if (!chatId || !text) return;
+
+  if (text === '/start') {
+    const memory = ensureMemoryState(loadJson<any>(MEMORY_PATH, { conversations: [] }));
+    memory.last_chat_id = chatId;
+    savedMemory.last_chat_id = chatId;
+    saveJson(MEMORY_PATH, memory);
+    await sendTelegramReply(chatId, 'Привет! Я Хори Кёко. Напиши мне что-нибудь, и я отвечу.');
+    return;
+  }
+
+  const history = histories.get(chatId) || (savedMemory.last_chat_id === chatId ? savedHistory : []);
+  await telegramRequest('sendChatAction', { chat_id: chatId, action: 'typing' });
+  const reply = await handleTelegramMessage(chatId, text, history.slice(-8));
+  if (reply) await sendTelegramReply(chatId, reply);
+
+  const nextHistory: Array<{ sender: 'user' | 'hori'; text: string }> = [
+    ...history,
+    { sender: 'user', text },
+    { sender: 'hori', text: reply || '' },
+  ];
+  histories.set(chatId, nextHistory.slice(-12));
+}
+
 async function startTelegramPolling() {
   if (!TELEGRAM_BOT_TOKEN) {
-    console.warn('Telegram polling is disabled: BOT_TOKEN is not configured.');
+    console.warn('Telegram bot is disabled: BOT_TOKEN is not configured.');
     return;
   }
 
   if (telegramPollingStarted) {
-    console.warn('Telegram polling is already running in this process; duplicate start ignored.');
+    console.warn('Telegram bot startup already completed in this process; duplicate start ignored.');
     return;
   }
   telegramPollingStarted = true;
 
   console.log(
-    'Pollinations routing: ' +
-      (process.env.POLLINATIONS_API_KEY ? 'configured' : 'MISSING POLLINATIONS_API_KEY') +
-      '; Kimi=' + (process.env.POLLINATIONS_KIMI_MODEL || 'kimi') +
-      ', DeepSeek=' + (process.env.POLLINATIONS_DEEPSEEK_MODEL || 'deepseek')
+    'Telegram routing: ' +
+      (process.env.POLLINATIONS_API_KEY ? 'Pollinations configured' : 'Pollinations image key missing') +
+      '; voice=node-edge-tts/free'
   );
 
   const savedMemory = ensureMemoryState(loadJson<any>(MEMORY_PATH, { conversations: [] }));
@@ -1497,11 +1523,26 @@ async function startTelegramPolling() {
     item?.hori ? { sender: 'hori' as const, text: item.hori } : null,
   ]).filter(Boolean) as Array<{ sender: 'user' | 'hori'; text: string }>;
   const histories = new Map<number, Array<{ sender: 'user' | 'hori'; text: string }>>();
-  let offset = 0;
+
+  const publicUrl = (process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
+  if (publicUrl) {
+    const webhookUrl = publicUrl + '/telegram/webhook';
+    await telegramRequest('setWebhook', {
+      url: webhookUrl,
+      drop_pending_updates: false,
+      allowed_updates: ['message'],
+    });
+    const info = await telegramRequest('getWebhookInfo');
+    console.log('Telegram webhook enabled: ' + webhookUrl + ' pending=' + (info?.pending_update_count ?? 0));
+    return;
+  }
+
+  // Local development fallback: long polling is used only when Render's public URL is unavailable.
   await telegramRequest('deleteWebhook', { drop_pending_updates: false });
   const bot = await telegramRequest('getMe');
-  console.log(`Telegram polling enabled for @${bot?.username || 'bot'}`);
+  console.log('Telegram local polling enabled for @' + (bot?.username || 'bot'));
 
+  let offset = 0;
   const poll = async () => {
     try {
       const updates = (await telegramRequest('getUpdates', {
@@ -1512,40 +1553,10 @@ async function startTelegramPolling() {
 
       for (const update of updates || []) {
         offset = update.update_id + 1;
-        const chatId = update.message?.chat?.id;
-        const text = update.message?.text?.trim();
-        if (!chatId || !text) continue;
-
-        if (text === '/start') {
-          const memory = ensureMemoryState(loadJson<any>(MEMORY_PATH, { conversations: [] }));
-          memory.last_chat_id = chatId;
-          savedMemory.last_chat_id = chatId;
-          saveJson(MEMORY_PATH, memory);
-          await sendTelegramReply(chatId, 'Привет! Я Хори Кёко. Напиши мне что-нибудь, и я отвечу.');
-          continue;
-        }
-
-        const history = histories.get(chatId) || (savedMemory.last_chat_id === chatId ? savedHistory : []);
-        await telegramRequest('sendChatAction', { chat_id: chatId, action: 'typing' });
-        const reply = await handleTelegramMessage(chatId, text, history.slice(-8));
-        if (reply) {
-          await sendTelegramReply(chatId, reply);
-        }
-        const nextHistory: Array<{ sender: 'user' | 'hori'; text: string }> = [
-          ...history,
-          { sender: 'user', text },
-          { sender: 'hori', text: reply },
-        ];
-        histories.set(chatId, nextHistory.slice(-12));
+        await processTelegramUpdate(update, histories, savedHistory, savedMemory);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
       console.error('Telegram polling error:', err);
-      if (/409|Conflict.*getUpdates|terminated by other getUpdates/i.test(message)) {
-        console.error('Telegram polling stopped: another bot instance is using getUpdates.');
-        telegramPollingStarted = false;
-        return;
-      }
       await new Promise((resolve) => setTimeout(resolve, 5000));
     }
     void poll();
@@ -2363,6 +2374,34 @@ app.post('/api/chat', async (req, res) => {
     emotion,
     animation,
   });
+});
+
+app.post('/telegram/webhook', async (req, res) => {
+  try {
+    if (!TELEGRAM_BOT_TOKEN) return res.sendStatus(404);
+
+    const update = req.body as TelegramUpdate;
+    const savedMemory = ensureMemoryState(loadJson<any>(MEMORY_PATH, { conversations: [] }));
+    const savedHistory = (savedMemory.conversations || []).flatMap((item: any) => [
+      item?.user ? { sender: 'user' as const, text: item.user } : null,
+      item?.hori ? { sender: 'hori' as const, text: item.hori } : null,
+    ]).filter(Boolean) as Array<{ sender: 'user' | 'hori'; text: string }>;
+
+    // Webhook requests are independent; keep short-lived per-process history.
+    if (!(globalThis as any).__horiTelegramHistories) {
+      (globalThis as any).__horiTelegramHistories = new Map<number, Array<{ sender: 'user' | 'hori'; text: string }>>();
+    }
+    await processTelegramUpdate(
+      update,
+      (globalThis as any).__horiTelegramHistories,
+      savedHistory,
+      savedMemory,
+    );
+    res.sendStatus(200);
+  } catch (err) {
+    console.error('Telegram webhook error:', err);
+    res.sendStatus(200);
+  }
 });
 
 const distPath = path.join(BASE_DIR, 'dist');
