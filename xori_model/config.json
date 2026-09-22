@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "maxSeqLen": 256,
+  "bosId": 1,
+  "eosId": 2,
+  "unkId": 3,
+  "padId": 0,
+  "vocabSize": 94,
+  "dModel": 128,
+  "nHeads": 4,
+  "nLayers": 4,
+  "trainedBy": "GitHub Actions cloud trainer"
+}
