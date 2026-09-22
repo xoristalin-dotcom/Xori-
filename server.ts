@@ -39,6 +39,7 @@ const OFFLINE_MODE = process.env.OFFLINE_MODE === 'true' || process.env.OFFLINE_
 const TELEGRAM_BOT_TOKEN = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '';
 const TELEGRAM_VOICE_URL = process.env.TELEGRAM_VOICE_URL || '';
 const TELEGRAM_PHOTO_URL = process.env.TELEGRAM_PHOTO_URL || '';
+const POLLINATIONS_API_KEY = process.env.POLLINATIONS_API_KEY || '';
 const INTERNAL_LEARNING_ENABLED = process.env.INTERNAL_LEARNING_ENABLED !== 'false';
 const WEB_SEARCH_ENABLED = process.env.WEB_SEARCH_ENABLED !== 'false';
 let internalReplyCounter = 0;
