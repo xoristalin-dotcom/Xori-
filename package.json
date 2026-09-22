@@ -20,7 +20,8 @@
     "three": "^0.160.0",
     "ffmpeg-static": "^5.2.0",
     "node-edge-tts": "^1.2.10",
-    "onnxruntime-node": "^1.22.0"
+    "onnxruntime-node": "^1.22.0",
+    "@huggingface/transformers": "^3.8.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
