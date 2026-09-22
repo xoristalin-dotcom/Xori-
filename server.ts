@@ -1180,6 +1180,9 @@ async function generateTelegramVoiceAudio(text: string): Promise<{ buffer: Buffe
       lang: 'ru-RU',
       outputFormat: 'audio-24khz-48kbitrate-mono-mp3',
       timeout: 30000,
+      rate: process.env.TELEGRAM_TTS_RATE || '-4%',
+      pitch: process.env.TELEGRAM_TTS_PITCH || '+3Hz',
+      volume: process.env.TELEGRAM_TTS_VOLUME || '+0%',
     });
     await tts.ttsPromise(input, outputPath);
 
