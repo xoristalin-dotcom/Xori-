@@ -9,7 +9,6 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import { generateXoriNeuralReply, getXoriNeuralStatus } from './xori_neural';
 import { generateXoriLocalReply, getXoriLocalModelStatus } from './xori_gpt';
-import { generateXoriConversationReply, getXoriConversationModelStatus } from './xori_conversation';
 import { generateXoriHfReply, getXoriHfBridgeStatus } from './xori_hf_bridge';
 
 function loadDotEnvFromProjectAndHome() {
@@ -1011,19 +1010,6 @@ async function generateTextWithConfiguredProvider(systemPrompt: string, userText
       console.log('[Xori HF] no usable reply; trying local providers.');
     } catch (err) {
       console.warn('[Xori HF] bridge failed; trying local providers:', err);
-    }
-  }
-
-  if (taskType !== 'image') {
-    try {
-      const conversationReply = await generateXoriConversationReply(systemPrompt, userText, history);
-      if (conversationReply) {
-        console.log(`[Xori Conversation] fallback reply model=${conversationReply.model} dtype=${conversationReply.dtype}`);
-        return conversationReply.text;
-      }
-      console.log('[Xori Conversation] no usable reply; trying Xori local GPT.');
-    } catch (err) {
-      console.warn('[Xori Conversation] local generator failed; trying Xori local GPT:', err);
     }
   }
 
