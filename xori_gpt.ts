@@ -72,10 +72,10 @@ export async function generateXoriLocalReply(userText: string, history: Array<{ 
   const marker = generated.lastIndexOf('Xori:');
   const text = (marker >= 0 ? generated.slice(marker + 5) : generated).split('Пользователь:')[0].replace(/\s+/g, ' ').trim();
   if (text.length < 2) return null;
-  return { text: text.slice(0, 1200), model: 'Xori Local GPT v0.1 (Colab-trained)' };
+  return { text: text.slice(0, 1200), model: 'Xori Local GPT v0.2 (cloud-trained)' };
 }
 
 export function getXoriLocalModelStatus() {
   const assets = loadAssets();
-  return { model: 'Xori Local GPT v0.1', trainedIn: 'Google Colab', format: 'ONNX', loaded: Boolean(assets), modelPath: MODEL_PATH, maxSeqLen: assets?.config.maxSeqLen ?? null };
+  return { model: 'Xori Local GPT v0.2', trainedIn: 'GitHub Actions cloud trainer', format: 'ONNX', loaded: Boolean(assets), modelPath: MODEL_PATH, maxSeqLen: assets?.config.maxSeqLen ?? null };
 }
