@@ -6,8 +6,13 @@ import torch
 from datasets import Dataset
 from huggingface_hub import login
 from peft import LoraConfig
-from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
-from trl import SFTTrainer
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    DataCollatorForLanguageModeling,
+    Trainer,
+    TrainingArguments,
+)
 
 BASE_MODEL = os.getenv("BASE_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "xoritg_adapter"))
@@ -23,7 +28,6 @@ def load_json(path, fallback):
         return fallback
 
 def seed_examples():
-    # Original examples: these are style/behavior examples, not copied dialogue.
     pairs = [
         ("Привет", "Привет. Ну наконец-то ты написал. Как у тебя день прошёл?"),
         ("Как дела?", "Нормально. Дел было много, но сейчас уже спокойнее. А у тебя как?"),
@@ -45,7 +49,7 @@ def seed_examples():
         ("Ты бот?", "Если ты спрашиваешь технически — да, я программа. Но в этом чате я отвечаю как Хори, а не сухим справочником."),
         ("Ты можешь ошибаться?", "Конечно. Если не уверена, лучше так и сказать, чем уверенно придумать ерунду."),
         ("Что будешь делать вечером?", "Скорее всего, помогу Соте, потом что-нибудь приготовлю и наконец сяду нормально отдохнуть."),
-        ("Почему ты иногда ворчишь?", "Потому что я человек... ну, почти. Если что-то меня раздражает, это обычно заметно."),
+        ("Почему ты иногда ворчишь?", "Потому что если что-то меня раздражает, это обычно заметно. Я не очень умею делать вид, что всё идеально."),
         ("Ты любишь школу?", "Есть вещи, которые нравятся, а есть те, от которых хочется сразу домой. Наверное, как у большинства."),
         ("Мне скучно", "Тогда давай хоть чем-нибудь займёмся. Можешь выбрать тему, а я подхвачу."),
         ("Поговори со мной", "Хорошо. Только без официального интервью, ладно? Расскажи лучше, что сегодня у тебя было интересного."),
@@ -62,18 +66,16 @@ def load_pairs():
     custom = ROOT / "hori_sft_seed.jsonl"
     if custom.exists():
         for line in custom.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            if row.get("user") and row.get("assistant"):
-                pairs.append((row["user"], row["assistant"]))
+            if line.strip():
+                row = json.loads(line)
+                if row.get("user") and row.get("assistant"):
+                    pairs.append((row["user"], row["assistant"]))
 
     training = load_json(ROOT / "hori_training.json", {"examples": []})
     for row in training.get("examples", []):
         if row.get("approved") and row.get("user") and row.get("assistant"):
             pairs.append((row["user"], row["assistant"]))
 
-    # Remove duplicates while preserving order.
     seen = set()
     result = []
     for user, assistant in pairs:
@@ -84,7 +86,15 @@ def load_pairs():
     return result
 
 def format_chat(user, assistant):
-    return f"<|im_start|>system\nТы — Хори Кёко из Horimiya. Отвечай только по-русски, естественно и по-человечески. Не копируй реплики из произведения. Не придумывай факты о собеседнике. Обычно 2–5 предложений. Не задавай больше одного вопроса.\n<|im_end|>\n<|im_start|>user\n{user}\n<|im_end|>\n<|im_start|>assistant\n{assistant}<|im_end|>"
+    return (
+        "<|im_start|>system\\n"
+        "Ты — Хори Кёко из Horimiya. Отвечай только по-русски, естественно и по-человечески. "
+        "Не копируй реплики из произведения. Не выдумывай факты о собеседнике. "
+        "Обычно 2–5 предложений. Не задавай больше одного вопроса.\\n"
+        "<|im_end|>\\n"
+        f"<|im_start|>user\\n{user}\\n<|im_end|>\\n"
+        f"<|im_start|>assistant\\n{assistant}<|im_end|>"
+    )
 
 def main():
     token = os.getenv("HF_TOKEN")
@@ -94,7 +104,7 @@ def main():
     pairs = load_pairs()
     print(f"training examples: {len(pairs)}")
     if len(pairs) < 30:
-        raise RuntimeError("Not enough training examples. Add approved Hori examples before training.")
+        raise RuntimeError("Not enough training examples.")
 
     dataset = Dataset.from_dict({"text": [format_chat(u, a) for u, a in pairs]})
 
@@ -102,9 +112,28 @@ def main():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    def tokenize(row):
+        encoded = tokenizer(
+            row["text"],
+            truncation=True,
+            max_length=MAX_SEQ_LENGTH,
+            padding=False,
+        )
+        encoded["labels"] = encoded["input_ids"].copy()
+        return encoded
+
+    tokenized = dataset.map(tokenize, remove_columns=["text"])
+
+    dtype = (
+        torch.bfloat16
+        if torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+        else torch.float16
+        if torch.cuda.is_available()
+        else torch.float32
+    )
     model = AutoModelForCausalLM.from_pretrained(
         BASE_MODEL,
-        torch_dtype=torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16,
+        torch_dtype=dtype,
         device_map="auto" if torch.cuda.is_available() else None,
         token=token,
     )
@@ -131,16 +160,20 @@ def main():
         bf16=torch.cuda.is_available() and torch.cuda.is_bf16_supported(),
         gradient_checkpointing=True,
         optim="adamw_torch",
+        remove_unused_columns=False,
     )
 
-    trainer = SFTTrainer(
+    trainer = Trainer(
         model=model,
-        processing_class=tokenizer,
-        train_dataset=dataset,
-        peft_config=lora,
         args=args,
-        max_seq_length=MAX_SEQ_LENGTH,
+        train_dataset=tokenized,
+        data_collator=DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False),
     )
+
+    # Attach LoRA after the Trainer's base model is loaded.
+    from peft import get_peft_model
+    trainer.model = get_peft_model(trainer.model, lora)
+    trainer.model.print_trainable_parameters()
 
     trainer.train()
     trainer.save_model(str(OUTPUT_DIR))
@@ -152,6 +185,9 @@ def main():
 
     print(f"saved adapter to {OUTPUT_DIR}")
     print(f"HF repo: {REPO_ID}")
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()
