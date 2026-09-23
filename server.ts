@@ -1495,21 +1495,14 @@ async function handleTelegramMessage(chatId: number, text: string, history: any[
     return '';
   }
 
-  // Let the agent continue the topic instead of forcing a question every time.
+  // Keep the primary Xori answer authoritative.
+  // Do NOT run the full provider chain a second time here: a follow-up call can
+  // fall back to Xori Neural and overwrite a valid Xori GPT response with
+  // unrelated/generated noise. Follow-up generation will be re-enabled once
+  // the local model can reliably condition on the follow-up instruction.
   let finalReply = reply;
-  if (decision.askQuestion && !/[?？]\\s*$/.test(finalReply)) {
-    try {
-      const followUpPrompt = `${buildSystemPrompt()}
-Только что ты ответила:
-"${finalReply}"
-Добавь в конце ОДИН естественный короткий вопрос, который продолжает именно эту тему.
-Не меняй смысл предыдущего ответа и не задавай формальный вопрос "Чем могу помочь?".
-Верни весь итоговый ответ целиком.`;
-      const continued = await generateTextWithConfiguredProvider(followUpPrompt, cleanText, history);
-      if (continued) finalReply = continued;
-    } catch (err) {
-      console.warn('Follow-up generation failed:', err);
-    }
+  if (decision.askQuestion) {
+    console.log('[Xori Follow-up] skipped secondary generation; keeping primary reply');
   }
 
   memory.last_chat_id = chatId;
