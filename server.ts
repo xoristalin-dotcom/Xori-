@@ -46,6 +46,8 @@ const TELEGRAM_BOT_TOKEN = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOK
 const TELEGRAM_VOICE_URL = process.env.TELEGRAM_VOICE_URL || '';
 const TELEGRAM_PHOTO_URL = process.env.TELEGRAM_PHOTO_URL || '';
 const POLLINATIONS_API_KEY = process.env.POLLINATIONS_API_KEY || '';
+const HF_XORI_URL = process.env.HF_XORI_URL || '';
+const HF_XORI_TOKEN = process.env.HF_XORI_TOKEN || process.env.HF_TOKEN || '';
 const INTERNAL_LEARNING_ENABLED = process.env.INTERNAL_LEARNING_ENABLED !== 'false';
 const WEB_SEARCH_ENABLED = process.env.WEB_SEARCH_ENABLED !== 'false';
 let internalReplyCounter = 0;
@@ -992,33 +994,54 @@ function generateInternalHoriThinker(systemPrompt: string, userText: string, his
   return `${openings[rotation]} ${emotionLine} ${requestBridge} ${answerBody}${sourceNote}`.replace(/\s+/g, ' ').trim();
 }
 
+async function generateHuggingFaceHoriReply(
+  systemPrompt: string,
+  userText: string,
+  history: any[] = [],
+): Promise<string> {
+  if (!HF_XORI_URL) return '';
+
+  try {
+    const response = await fetch(HF_XORI_URL.replace(/\/$/, '') + '/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(HF_XORI_TOKEN ? { Authorization: 'Bearer ' + HF_XORI_TOKEN } : {}),
+      },
+      body: JSON.stringify({
+        message: userText,
+        history: history.slice(-6),
+        system_prompt: systemPrompt,
+      }),
+      signal: AbortSignal.timeout(60000),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error('HF Xori HTTP ' + response.status + ': ' + body.slice(0, 300));
+    }
+
+    const data = await response.json();
+    const reply = typeof data?.reply === 'string' ? data.reply.trim() : '';
+    if (!reply) throw new Error('HF Xori returned an empty reply');
+
+    console.log('[HF Xori] reply model=' + String(data?.model || 'unknown'));
+    return reply;
+  } catch (err) {
+    console.warn('[HF Xori] generation failed; switching to fallback providers:', err);
+    return '';
+  }
+}
+
 async function generateTextWithConfiguredProvider(systemPrompt: string, userText: string, history: any[] = []) {
   const taskType = detectTaskType(userText);
 
-  // Xori's own model is the first generative engine. External providers remain fallbacks.
-  // Colab-trained Xori GPT is the primary generative model.
+  // The old 850K char-level from-scratch ONNX model is intentionally no longer
+  // in the live text path. It was too small and had too little training data
+  // to produce reliable conversational language.
   if (taskType !== 'image') {
-    try {
-      const localReply = await generateXoriLocalReply(userText, history);
-      if (localReply) {
-        console.log(`[Xori Local GPT] primary reply model=${localReply.model}`);
-        return localReply.text;
-      }
-      console.log('[Xori Local GPT] model files are missing or generation was unavailable; trying Xori Neural.');
-    } catch (err) {
-      console.warn('[Xori Local GPT] local inference failed; trying Xori Neural:', err);
-    }
-
-    try {
-      const neuralReply = generateXoriNeuralReply(userText);
-      if (neuralReply) {
-        console.log(`[Xori Neural] secondary local reply confidence=${neuralReply.confidence.toFixed(3)} model=${neuralReply.model}`);
-        return neuralReply.text;
-      }
-      console.log('[Xori Neural] confidence too low; switching to external model chain.');
-    } catch (err) {
-      console.warn('[Xori Neural] local inference failed; switching to external model chain:', err);
-    }
+    const hfReply = await generateHuggingFaceHoriReply(systemPrompt, userText, history);
+    if (hfReply) return hfReply;
   }
 
   const providerOrder = getProviderOrderByTask(taskType);
@@ -1027,6 +1050,7 @@ async function generateTextWithConfiguredProvider(systemPrompt: string, userText
     console.warn('[Local fallback] No healthy external provider is available; answering without API.');
     return localReply;
   }
+
   const hasExplicitUrl = extractUrlCandidates(userText).length > 0;
   const useLegacyWebContext = INTERNAL_LEARNING_ENABLED
     && shouldUseWebContext(userText)
@@ -1041,12 +1065,14 @@ async function generateTextWithConfiguredProvider(systemPrompt: string, userText
   const webContext = [searchContext, wikipediaContext, openWebContext, siteContext].filter(Boolean).join('\n\n');
   const enrichedPrompt = taskType === 'search'
     ? systemPrompt + '\n\nРЕЖИМ ПОИСКА: используй доступный веб-поиск этой модели. Ищи актуальные данные, отделяй факты от предположений, указывай названия источников и даты, если они доступны. Не выдумывай источники или ссылки.' + (webContext ? '\n\nДанные по указанной ссылке:\n' + webContext : '')
-    : webContext      ? systemPrompt + '\n\nДополнительный внешний контекст для обучения и уточнения: ' + webContext
+    : webContext
+      ? systemPrompt + '\n\nДополнительный внешний контекст для обучения и уточнения: ' + webContext
       : systemPrompt;
 
   for (const provider of providerOrder) {
     if (isProviderCoolingDown(provider)) {
-      console.warn(`${provider.label} skipped because it is cooling down.`);      continue;
+      console.warn(provider.label + ' skipped because it is cooling down.');
+      continue;
     }
 
     if (provider.kind.startsWith('pollinations-')) {
@@ -1078,9 +1104,6 @@ async function generateTextWithConfiguredProvider(systemPrompt: string, userText
         const text = response.text?.trim();
         if (text) {
           markProviderSuccess(provider);
-          if (isRepeatedAssistantResponse(text, history)) {
-            console.warn('Gemini returned a repeated response; keeping it instead of spending another provider request.');
-          }
           return text;
         }
       } catch (err) {
@@ -1103,19 +1126,14 @@ async function generateTextWithConfiguredProvider(systemPrompt: string, userText
 
       if (text) {
         markProviderSuccess(provider);
-        if (isRepeatedAssistantResponse(text, history)) {
-          console.warn(`${provider.label} returned a repeated response; keeping it instead of spending another provider request.`);
-        }
         return text;
       }
     } catch (err) {
       markProviderFailure(provider, err);
-      console.warn(`[Model switch] ${provider.label} failed; switching to next provider:`, err);
+      console.warn('[Model switch] ' + provider.label + ' failed; switching to next provider:', err);
     }
   }
 
-  // No cloud provider left: answer with the built-in deterministic Hori thinker.
-  // This path uses no API key, no paid service, and no external quota.
   const localReply = generateInternalHoriThinker(enrichedPrompt, userText, history, webContext);
   if (localReply) {
     console.warn('[Local fallback] All external providers unavailable; using internal Hori thinker.');
