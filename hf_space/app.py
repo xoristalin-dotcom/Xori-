@@ -2,16 +2,24 @@ import os
 import gradio as gr
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import PeftModel
 
-MODEL_ID = os.getenv("XORI_MODEL_ID", "Abobus2222228/Xoritg")
+BASE_MODEL = os.getenv("XORI_BASE_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
+ADAPTER_ID = os.getenv("XORI_MODEL_ID", "Abobus2222228/Xoritg")
 MAX_NEW_TOKENS = int(os.getenv("XORI_MAX_NEW_TOKENS", "256"))
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+
+use_cuda = torch.cuda.is_available()
 model = AutoModelForCausalLM.from_pretrained(
-    MODEL_ID,
-    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-    device_map="auto",
+    BASE_MODEL,
+    torch_dtype=torch.float16 if use_cuda else torch.float32,
+    device_map="auto" if use_cuda else None,
 )
+model = PeftModel.from_pretrained(model, ADAPTER_ID)
+model.eval()
 
 def generate(prompt: str) -> str:
     messages = [
