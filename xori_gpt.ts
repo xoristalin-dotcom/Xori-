@@ -107,9 +107,20 @@ export async function generateXoriLocalReply(
   let ids = [config.bosId, ...encode(prompt, vocab, config.unkId)].slice(-config.maxSeqLen + 1);
   const promptLength = ids.length;
 
-  for (let step = 0; step < 160; step++) {
-    const input = new BigInt64Array(ids.map(id => BigInt(id)));
-    const tensor = new ort.Tensor('int64', input, [1, ids.length]);
+  // The exported Transformer currently has a fixed 256-token ONNX attention graph.
+  // Keep the runtime input fixed-size and use only the real sequence prefix for
+  // sampling. This prevents ONNX Runtime reshape failures on short prompts.
+  const fixedLength = config.maxSeqLen;
+  if (fixedLength < ids.length) ids = ids.slice(-fixedLength);
+
+  for (let step = 0; step < 160 && ids.length < fixedLength; step++) {
+    const padded = new BigInt64Array(fixedLength);
+    padded.fill(BigInt(config.padId ?? 0));
+    ids.forEach((id, index) => {
+      padded[index] = BigInt(id);
+    });
+
+    const tensor = new ort.Tensor('int64', padded, [1, fixedLength]);
     const outputs = await session.run({ input_ids: tensor });
     const logits = outputs.logits;
 
@@ -156,3 +167,5 @@ export function getXoriLocalModelStatus() {
     validationLoss: assets?.config.bestValLoss ?? null,
   };
 }
+
+// Runtime fix: pad inference inputs to the exported fixed sequence length.
