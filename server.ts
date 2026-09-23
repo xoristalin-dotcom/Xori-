@@ -1198,17 +1198,35 @@ type TelegramUpdate = {
 
 async function telegramRequest(method: string, body: Record<string, unknown> = {}) {
   if (!TELEGRAM_BOT_TOKEN) return null;
-  const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/${method}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
 
-  const data = await response.json();
-  if (!response.ok || !data.ok) {
-    throw new Error(`Telegram ${method} failed: ${JSON.stringify(data).slice(0, 400)}`);
+  // Render can occasionally lose the outbound connection to api.telegram.org.
+  // Retry transient network failures so a successfully generated Xori reply
+  // is not silently lost.
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/${method}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(20000),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(`Telegram ${method} failed: ${JSON.stringify(data).slice(0, 400)}`);
+      }
+      return data.result;
+    } catch (error) {
+      lastError = error;
+      console.warn(`Telegram ${method} attempt ${attempt}/3 failed:`, error);
+      if (attempt < 3) await new Promise(resolve => setTimeout(resolve, attempt * 1200));
+    }
   }
-  return data.result;
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Telegram ${method} failed after 3 attempts`);
 }
 
 async function sendTelegramReply(chatId: number, text: string) {
