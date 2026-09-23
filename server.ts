@@ -259,10 +259,18 @@ function detectTaskType(text: string): 'coding' | 'error' | 'math' | 'logic' | '
 }
 
 function getProviderOrderByTask(taskType: string) {
-  // Hori text is intentionally routed only through Pollinations models.
-  // Pollinations documents these as the free model set in its current OpenClaw config:
-  // kimi, deepseek, glm, gemini-search, claude-fast.
+  // Hori text uses only Pollinations models. If one model is rate-limited,
+  // the normal provider loop skips it temporarily and tries the next Pollinations model.
+  // Current Pollinations free model IDs: kimi, deepseek, glm, gemini-search, claude-fast.
   const all = [
+    {
+      enabled: Boolean(process.env.POLLINATIONS_API_KEY),
+      apiKey: process.env.POLLINATIONS_API_KEY,
+      baseUrl: 'https://gen.pollinations.ai/v1',
+      model: process.env.POLLINATIONS_KIMI_MODEL || 'kimi',
+      label: 'Pollinations Kimi K2.5',
+      kind: 'pollinations-kimi',
+    },
     {
       enabled: Boolean(process.env.POLLINATIONS_API_KEY),
       apiKey: process.env.POLLINATIONS_API_KEY,
@@ -295,68 +303,20 @@ function getProviderOrderByTask(taskType: string) {
       label: 'Pollinations Claude Haiku',
       kind: 'pollinations-claude-fast',
     },
-    {
-      enabled: Boolean(process.env.GEMINI_API_KEY),
-      apiKey: process.env.GEMINI_API_KEY,
-      baseUrl: '',
-      model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
-      label: 'Google Gemini',
-      kind: 'gemini',
-    },
-    {
-      enabled: Boolean(process.env.OPENROUTER_API_KEY),
-      apiKey: process.env.OPENROUTER_API_KEY,
-      baseUrl: 'https://openrouter.ai/api/v1',
-      model: process.env.OPENROUTER_MODEL || 'openrouter/free',
-      label: 'OpenRouter Free',
-      kind: 'openrouter-free',
-    },
-    {
-      enabled: Boolean(process.env.OPENROUTER_API_KEY),
-      apiKey: process.env.OPENROUTER_API_KEY,
-      baseUrl: 'https://openrouter.ai/api/v1',
-      model: process.env.OPENROUTER_MODEL_PAID || 'openrouter/free',
-      label: 'OpenRouter fallback',
-      kind: 'cloud',
-    },
-    {
-      enabled: Boolean(process.env.GROQ_API_KEY),
-      apiKey: process.env.GROQ_API_KEY,
-      baseUrl: 'https://api.groq.com/openai/v1',
-      model: process.env.GROQ_MODEL || 'llama-3.1-8b-instant',
-      label: 'Groq',
-      kind: 'cloud',
-    },
-    {
-      enabled: Boolean(process.env.KIE_API_KEY),
-      apiKey: process.env.KIE_API_KEY,
-      baseUrl: process.env.KIE_BASE_URL || 'https://api.kie.ai/v1',
-      model: process.env.KIE_MODEL || 'gpt-4o-mini',
-      label: 'Kie.ai',
-      kind: 'cloud',
-    },
-    {
-      enabled: Boolean(process.env.OPENAI_API_KEY),
-      apiKey: process.env.OPENAI_API_KEY,
-      baseUrl: 'https://api.openai.com/v1',
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      label: 'OpenAI',
-      kind: 'cloud',
-    },
   ];
 
   const weights: Record<string, string[]> = {
-    generic: ['pollinations-deepseek', 'pollinations-glm', 'gemini', 'openrouter-free', 'pollinations-claude-fast', 'pollinations-gemini-search', 'cloud'],
-    logic: ['pollinations-glm', 'pollinations-deepseek', 'gemini', 'openrouter-free', 'cloud'],
-    search: ['pollinations-gemini-search', 'gemini', 'pollinations-deepseek', 'openrouter-free', 'cloud'],
-    fast: ['pollinations-claude-fast', 'gemini', 'openrouter-free', 'cloud'],
-    learning: ['gemini', 'pollinations-deepseek', 'pollinations-glm', 'openrouter-free', 'cloud'],
-    error: ['pollinations-deepseek', 'gemini', 'pollinations-glm', 'openrouter-free', 'cloud'],
-    coding: ['pollinations-deepseek', 'gemini', 'pollinations-glm', 'openrouter-free', 'cloud'],
-    math: ['pollinations-glm', 'gemini', 'pollinations-deepseek', 'openrouter-free', 'cloud'],
-    creative: ['gemini', 'pollinations-claude-fast', 'pollinations-glm', 'openrouter-free', 'cloud'],
-    emotional: ['gemini', 'pollinations-claude-fast', 'pollinations-deepseek', 'openrouter-free', 'cloud'],
-    long: ['gemini', 'pollinations-deepseek', 'pollinations-glm', 'openrouter-free', 'cloud'],
+    generic: ['pollinations-kimi', 'pollinations-deepseek', 'pollinations-glm', 'pollinations-claude-fast', 'pollinations-gemini-search'],
+    logic: ['pollinations-glm', 'pollinations-kimi', 'pollinations-deepseek', 'pollinations-claude-fast'],
+    search: ['pollinations-gemini-search', 'pollinations-kimi', 'pollinations-deepseek', 'pollinations-glm'],
+    fast: ['pollinations-claude-fast', 'pollinations-kimi', 'pollinations-glm', 'pollinations-deepseek'],
+    learning: ['pollinations-kimi', 'pollinations-deepseek', 'pollinations-glm', 'pollinations-claude-fast'],
+    error: ['pollinations-deepseek', 'pollinations-kimi', 'pollinations-glm', 'pollinations-claude-fast'],
+    coding: ['pollinations-kimi', 'pollinations-deepseek', 'pollinations-glm', 'pollinations-claude-fast'],
+    math: ['pollinations-glm', 'pollinations-kimi', 'pollinations-deepseek', 'pollinations-claude-fast'],
+    creative: ['pollinations-kimi', 'pollinations-claude-fast', 'pollinations-glm', 'pollinations-deepseek'],
+    emotional: ['pollinations-claude-fast', 'pollinations-kimi', 'pollinations-glm', 'pollinations-deepseek'],
+    long: ['pollinations-kimi', 'pollinations-deepseek', 'pollinations-glm', 'pollinations-gemini-search'],
     image: [],
   };
 
