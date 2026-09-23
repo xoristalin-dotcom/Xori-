@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "maxSeqLen": 256,
   "bosId": 1,
   "eosId": 2,
@@ -9,5 +9,7 @@
   "dModel": 128,
   "nHeads": 4,
   "nLayers": 4,
+  "bestValLoss": 3.2005131244659424,
+  "examples": 35,
   "trainedBy": "GitHub Actions cloud trainer"
 }
