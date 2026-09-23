@@ -80,4 +80,8 @@ jobs:
           fi
 
           git commit -m "Train Xori cloud model"
+
+          # Another commit may land while CPU training is running.
+          git fetch origin main
+          git rebase origin/main
           git push
