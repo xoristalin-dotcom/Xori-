@@ -994,112 +994,12 @@ async function generateHuggingFaceHoriReply(
 }
 
 async function generateTextWithConfiguredProvider(systemPrompt: string, userText: string, history: any[] = []) {
-  const taskType = detectTaskType(userText);
+  // Все текстовые ответы Хори идут только через нашу обученную HF-модель.
+  // Pollinations/Kimi/другие внешние LLM больше не используются как fallback для текста.
+  const hfReply = await generateHuggingFaceHoriReply(systemPrompt, userText, history);
+  if (hfReply) return hfReply;
 
-  // The old 850K char-level from-scratch ONNX model is intentionally no longer
-  // in the live text path. It was too small and had too little training data
-  // to produce reliable conversational language.
-  if (taskType !== 'image') {
-    const hfReply = await generateHuggingFaceHoriReply(systemPrompt, userText, history);
-    if (hfReply) return hfReply;
-  }
-
-  const providerOrder = getProviderOrderByTask(taskType);
-  if (!hasUsableExternalProvider(taskType)) {
-    const localReply = generateInternalHoriThinker(systemPrompt, userText, history, '');
-    console.warn('[Local fallback] No healthy external provider is available; answering without API.');
-    return localReply;
-  }
-
-  const hasExplicitUrl = extractUrlCandidates(userText).length > 0;
-  const useLegacyWebContext = INTERNAL_LEARNING_ENABLED
-    && shouldUseWebContext(userText)
-    && (taskType !== 'search' || hasExplicitUrl);
-  const siteContext = useLegacyWebContext ? await fetchWebContextFromUrls(userText) : '';
-  const [searchContext, wikipediaContext] = useLegacyWebContext && taskType !== 'search'
-    ? await Promise.all([fetchWebContext(userText), fetchWikipediaContext(userText)])
-    : ['', ''];
-  const openWebContext = useLegacyWebContext && taskType !== 'search'
-    ? await fetchOpenWebSources(userText)
-    : '';
-  const webContext = [searchContext, wikipediaContext, openWebContext, siteContext].filter(Boolean).join('\n\n');
-  const enrichedPrompt = taskType === 'search'
-    ? systemPrompt + '\n\nРЕЖИМ ПОИСКА: используй доступный веб-поиск этой модели. Ищи актуальные данные, отделяй факты от предположений, указывай названия источников и даты, если они доступны. Не выдумывай источники или ссылки.' + (webContext ? '\n\nДанные по указанной ссылке:\n' + webContext : '')
-    : webContext
-      ? systemPrompt + '\n\nДополнительный внешний контекст для обучения и уточнения: ' + webContext
-      : systemPrompt;
-
-  for (const provider of providerOrder) {
-    if (isProviderCoolingDown(provider)) {
-      console.warn(provider.label + ' skipped because it is cooling down.');
-      continue;
-    }
-
-    if (provider.kind.startsWith('pollinations-')) {
-      console.log('Trying ' + provider.label + ' (' + provider.model + ')...');
-    }
-
-    if (provider.kind === 'gemini') {
-      const gemini = getAI();
-      if (!gemini) continue;
-      try {
-        const contents: any[] = [];
-        for (const h of history.slice(-6)) {
-          contents.push({
-            role: h.sender === 'user' ? 'user' : 'model',
-            parts: [{ text: h.text || '' }],
-          });
-        }
-        contents.push({ role: 'user', parts: [{ text: userText }] });
-
-        const response = await gemini.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents,
-          config: {
-            systemInstruction: enrichedPrompt,
-            temperature: 0.85,
-          },
-        });
-
-        const text = response.text?.trim();
-        if (text) {
-          markProviderSuccess(provider);
-          return text;
-        }
-      } catch (err) {
-        markProviderFailure(provider, err);
-        console.warn('Gemini call failed, trying next provider:', err);
-      }
-      continue;
-    }
-
-    if (!provider.enabled || !provider.apiKey) continue;
-
-    try {
-      const text = await callOpenAICompatible({
-        baseUrl: provider.baseUrl,
-        apiKey: provider.apiKey,
-        model: provider.model,
-        messages: buildChatMessages(enrichedPrompt, userText, history),
-        temperature: 0.85,
-      });
-
-      if (text) {
-        markProviderSuccess(provider);
-        return text;
-      }
-    } catch (err) {
-      markProviderFailure(provider, err);
-      console.warn('[Model switch] ' + provider.label + ' failed; switching to next provider:', err);
-    }
-  }
-
-  const localReply = generateInternalHoriThinker(enrichedPrompt, userText, history, webContext);
-  if (localReply) {
-    console.warn('[Local fallback] All external providers unavailable; using internal Hori thinker.');
-    return localReply;
-  }
-
+  console.error('[Xori Hori AI] Hugging Face model is unavailable; refusing to switch to external chat models.');
   return '';
 }
 
