@@ -24,9 +24,9 @@ async function handler(req,res){
  const u=new URL(req.url,'http://localhost');
  if(req.method==='GET'&&u.pathname==='/app.js'){
   const html=page();
-  const start=html.indexOf('<script>')+8;
-  const end=html.lastIndexOf('</script>');
-  const js=start>=8&&end>start?html.slice(start,end):'';
+  const marker='<script src="/app.js" defer></script>';
+  const start=html.indexOf(marker);
+  const js=start>=0?html.slice(start+marker.length).replace(/<\\/body>[\\s\\S]*$/,'').trim():'';
   res.writeHead(200,{'Content-Type':'application/javascript; charset=utf-8','Cache-Control':'no-store'});
   return res.end(js);
  }
@@ -124,7 +124,7 @@ body{padding-bottom:76px}#app{display:block}aside{position:fixed;z-index:50;left
 .brand,.side{display:none}nav{display:flex;gap:5px;height:100%;justify-content:space-around;overflow:hidden}nav button{flex:1;min-width:0;margin:0;padding:7px 3px;border:0;text-align:center;font-size:0;color:#777f91;border-radius:12px}nav button::first-letter{font-size:20px}nav button.on{color:#fff;box-shadow:inset 0 2px var(--accent)}nav button.on::after{display:none}
 main{padding:15px 12px 20px}header{position:sticky;top:0;padding:8px 0 14px;margin-bottom:16px}h1{font-size:24px}.ey{font-size:8px;letter-spacing:1.8px}header .save{font-size:11px;padding:9px 10px}.card{padding:16px;border-radius:16px}.hero{padding:20px}.actions{gap:7px}.action{flex:1;min-width:130px;text-align:center}
 }
-</style></style></head><body><div id="app"><aside id="sidebar"><div class="brand"><div class="av">H</div><div><b>HORI CONTROL</b><small>central command</small></div></div><div class="nav-title">Управление</div><nav id="nav"></nav><div class="side"><span class="dot"></span><span id="status">Подключение…</span></div></aside><main><header><div><div class="ey">XORI / HORI / CONTROL</div><h1 id="title">Обзор</h1></div><button class="save" onclick="save()">💾 Сохранить раздел</button></header><div id="content"></div><footer>Hori Control v1 • секреты только на сервере</footer></main></div><script src="/app.js" defer></script>
+</style></head><body><div id="app"><aside id="sidebar"><div class="brand"><div class="av">H</div><div><b>HORI CONTROL</b><small>central command</small></div></div><div class="nav-title">Управление</div><nav id="nav"></nav><div class="side"><span class="dot"></span><span id="status">Подключение…</span></div></aside><main><header><div><div class="ey">XORI / HORI / CONTROL</div><h1 id="title">Обзор</h1></div><button class="save" onclick="save()">💾 Сохранить раздел</button></header><div id="content"></div><footer>Hori Control v1 • секреты только на сервере</footer></main></div><script src="/app.js" defer></script>
 const tabs=[['overview','⌂ Обзор'],['keys','🔑 API / Ключи'],['hori','♡ Хори'],['bot','◉ Бот'],['model','◈ Модель'],['lora','◇ LoRA'],['memory','☷ Память'],['files','▤ Файлы'],['render','▣ Render'],['colab','▤ Colab'],['github','◈ GitHub'],['logs','≋ Логи']];let tab='overview',s={renderServices:[],envKeys:[]};let logs=[];
 const $=x=>document.getElementById(x);async function api(p,o={}){
  const ctrl=new AbortController();
