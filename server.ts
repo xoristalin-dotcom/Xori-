@@ -1066,7 +1066,7 @@ async function generateXoriWebAwareReply(systemPrompt: string, userText: string,
   try { firstPass = await generateTextWithConfiguredProvider(toolPrompt, userText, history); }
   catch (error) { console.warn('[Xori Web Tool] first pass failed:', error); }
 
-  const match = firstPass.match(/<search>\s*([\\s\\S]*?)\s*<\\/search>/i);
+    const match = firstPass.match(/<search>\s*([\s\S]*?)\s*<\/search>/i);
   const query = (match?.[1] || '').trim() || (shouldUseWebContext(userText) ? userText : '');
   if (!query || !WEB_SEARCH_ENABLED) return firstPass.replace(/<search>[\\s\\S]*?<\\/search>/gi, '').trim();
 
