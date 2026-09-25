@@ -23,7 +23,7 @@ async function handler(req,res){
  console.log(`[HTTP] ${req.method} ${req.url}`);
  const u=new URL(req.url,'http://localhost');
  if(req.method==='GET'&&u.pathname==='/app.js'){
-  const file=path.join(process.cwd(),'hori-control-panel','app.js');
+  const file=path.join(path.dirname(new URL(import.meta.url).pathname),'app.js');
   try{
    const js=fs.readFileSync(file,'utf8');
    res.writeHead(200,{'Content-Type':'application/javascript; charset=utf-8','Cache-Control':'no-store'});
