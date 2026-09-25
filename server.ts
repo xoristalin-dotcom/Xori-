@@ -51,7 +51,6 @@ const HF_XORI_TOKEN = process.env.HF_XORI_TOKEN || process.env.HF_TOKEN || '';
 const INTERNAL_LEARNING_ENABLED = process.env.INTERNAL_LEARNING_ENABLED !== 'false';
 const WEB_SEARCH_ENABLED = process.env.WEB_SEARCH_ENABLED !== 'false';
 const CONTROL_TOKEN = process.env.HORI_CONTROL_TOKEN || '';
-const CONTROL_PATH = path.join(BASE_DIR, 'hori_control.json');
 let internalReplyCounter = 0;
 const providerCooldowns = new Map<string, number>();
 const providerLastErrors = new Map<string, string>();
@@ -63,6 +62,7 @@ app.use(express.json({ limit: '10mb' }));
 
 // Paths to JSON data files
 const BASE_DIR = process.cwd();
+const CONTROL_PATH = path.join(BASE_DIR, 'hori_control.json');
 const MEMORY_PATH = path.join(BASE_DIR, 'hori_memory.json');
 const DIARY_PATH = path.join(BASE_DIR, 'hori_diary.json');
 const PERSONALITY_PATH = path.join(BASE_DIR, 'hori_personality.json');
