@@ -1059,6 +1059,35 @@ async function generateTextWithConfiguredProvider(systemPrompt: string, userText
   }
 }
 
+
+async function generateXoriWebAwareReply(systemPrompt: string, userText: string, history: any[] = []): Promise<string> {
+  const toolPrompt = systemPrompt + `\n\nИнтернет — это инструмент Xori. Если для ответа нужны свежие данные, новости, цены, погода, источники или ссылки, сначала выведи ровно <search>точный запрос</search>. Если поиск не нужен, отвечай без тега. После получения результатов ответь пользователю сама и не упоминай служебные теги.`;
+  let firstPass = '';
+  try { firstPass = await generateTextWithConfiguredProvider(toolPrompt, userText, history); }
+  catch (error) { console.warn('[Xori Web Tool] first pass failed:', error); }
+
+  const match = firstPass.match(/<search>\s*([\\s\\S]*?)\s*<\\/search>/i);
+  const query = (match?.[1] || '').trim() || (shouldUseWebContext(userText) ? userText : '');
+  if (!query || !WEB_SEARCH_ENABLED) return firstPass.replace(/<search>[\\s\\S]*?<\\/search>/gi, '').trim();
+
+  let webContext = '';
+  try {
+    const [search, wikipedia, openWeb, directPages] = await Promise.all([
+      fetchWebContext(query),
+      fetchWikipediaContext(query),
+      fetchOpenWebSources(query),
+      fetchWebContextFromUrls(userText),
+    ]);
+    webContext = [search, wikipedia, openWeb, directPages].filter(Boolean).join('\n\n').slice(0, 7500);
+  } catch (error) { console.warn('[Xori Web Tool] search failed:', error); }
+
+  if (!webContext) return firstPass.replace(/<search>[\\s\\S]*?<\\/search>/gi, '').trim() || 'Я не смогла получить свежие данные из интернета. Попробуй ещё раз чуть позже.';
+
+  const groundedPrompt = systemPrompt + `\n\nРезультаты интернет-поиска:\n---\n${webContext}\n---\nОтветь на исходный запрос, опираясь на эти результаты. Не упоминай внутренний инструмент и не выдумывай факты.`;
+  const finalReply = await generateTextWithConfiguredProvider(groundedPrompt, userText, history);
+  return (finalReply || firstPass).replace(/<search>[\\s\\S]*?<\\/search>/gi, '').trim();
+}
+
 async function generateSpecializedProviderReply(
   taskType: string,
   systemPrompt: string,
@@ -1101,7 +1130,7 @@ async function generateSpecializedProviderReply(
 
 function shouldUseSpecializedProvider(taskType: string): boolean {
   // Normal conversation is ALWAYS Xori AI.
-  return ['coding', 'error', 'math', 'logic', 'search', 'learning'].includes(taskType);
+  return ['coding', 'error', 'math', 'logic', 'learning'].includes(taskType);
 }
 
 app.post('/api/web/extract', async (req, res) => {
@@ -1456,7 +1485,9 @@ async function handleTelegramMessage(chatId: number, text: string, history: any[
   const taskType = detectTaskType(cleanText);
   let reply = '';
   try {
-    if (shouldUseSpecializedProvider(taskType)) {
+    if (taskType === 'search') {
+      reply = await generateXoriWebAwareReply(sysPrompt, cleanText, Array.isArray(history) ? history : []);
+    } else if (shouldUseSpecializedProvider(taskType)) {
       reply = await generateSpecializedProviderReply(
         taskType,
         buildSystemPrompt(),
@@ -2430,7 +2461,9 @@ app.post('/api/chat', async (req, res) => {
   const taskType = detectTaskType(cleanText);
 
   try {
-    if (shouldUseSpecializedProvider(taskType)) {
+    if (taskType === 'search') {
+      reply = await generateXoriWebAwareReply(buildSystemPrompt(), cleanText, history);
+    } else if (shouldUseSpecializedProvider(taskType)) {
       reply = await generateSpecializedProviderReply(
         taskType,
         sysPrompt,
