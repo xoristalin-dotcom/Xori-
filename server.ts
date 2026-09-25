@@ -994,13 +994,69 @@ async function generateHuggingFaceHoriReply(
 }
 
 async function generateTextWithConfiguredProvider(systemPrompt: string, userText: string, history: any[] = []) {
-  // Все текстовые ответы Хори идут только через нашу обученную HF-модель.
-  // Pollinations/Kimi/другие внешние LLM больше не используются как fallback для текста.
-  const hfReply = await generateHuggingFaceHoriReply(systemPrompt, userText, history);
-  if (hfReply) return hfReply;
+  // Основная модель Хори работает удалённо в Cloudflare Workers AI.
+  // Render остаётся лёгким bridge и не загружает модель в свою RAM.
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || '';
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN || '';
+  const fineTuneId = process.env.CLOUDFLARE_FINETUNE_ID || '';
 
-  console.error('[Xori Hori AI] Hugging Face model is unavailable; refusing to switch to external chat models.');
-  return '';
+  if (!accountId || !apiToken || !fineTuneId) {
+    console.error('[Cloudflare Xori] Missing CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN or CLOUDFLARE_FINETUNE_ID.');
+    return '';
+  }
+
+  const messages = buildChatMessages(systemPrompt, userText, history);
+
+  try {
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/meta/llama-3.2-3b-instruct`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiToken}`,
+        },
+        body: JSON.stringify({
+          messages,
+          lora: fineTuneId,
+          raw: true,
+          max_tokens: 512,
+          temperature: 0.7,
+        }),
+        signal: AbortSignal.timeout(60000),
+      },
+    );
+
+    const data = await response.json() as any;
+
+    if (!response.ok || data?.success === false) {
+      console.error(
+        '[Cloudflare Xori] request failed:',
+        response.status,
+        JSON.stringify(data).slice(0, 1200),
+      );
+      return '';
+    }
+
+    const content =
+      data?.result?.choices?.[0]?.message?.content ||
+      data?.result?.response ||
+      '';
+
+    if (typeof content !== 'string' || !content.trim()) {
+      console.error('[Cloudflare Xori] Empty model response:', JSON.stringify(data).slice(0, 1000));
+      return '';
+    }
+
+    console.log(
+      `[Cloudflare Xori] success fine-tune=${fineTuneId} model=${data?.result?.model || '@cf/meta/llama-3.2-3b-instruct'}`,
+    );
+
+    return content.trim();
+  } catch (error) {
+    console.error('[Cloudflare Xori] inference error:', error);
+    return '';
+  }
 }
 
 app.post('/api/web/extract', async (req, res) => {
