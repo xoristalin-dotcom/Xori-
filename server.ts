@@ -1557,7 +1557,7 @@ async function handleTelegramMessage(chatId: number, text: string, history: any[
 
   // Media replies are exclusive: when Hori chooses voice/photo, Telegram gets only that media.
   // This prevents the old behavior where a voice was immediately followed by the same text.
-  if (decision.sendVoice || isVoiceRequest(cleanText)) {
+  if (control.voiceEnabled && (decision.sendVoice || isVoiceRequest(cleanText))) {
     const sent = await sendTelegramVoice(chatId, finalReply).catch((err) => {
       console.warn('Telegram voice failed:', err);
       return false;
@@ -1565,7 +1565,7 @@ async function handleTelegramMessage(chatId: number, text: string, history: any[
     if (sent) return '';
   }
 
-  if (decision.sendImage) {
+  if (control.photoEnabled && decision.sendImage) {
     const visualReference = isHoriSelfPhotoRequest(cleanText) ? await fetchHoriVisualReference() : '';
     const imagePrompt = buildImagePrompt(cleanText, visualReference);
     const sent = await sendTelegramPhoto(chatId, imagePrompt, '').catch((err) => {
