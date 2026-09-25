@@ -23,12 +23,12 @@ async function handler(req,res){
  console.log(`[HTTP] ${req.method} ${req.url}`);
  const u=new URL(req.url,'http://localhost');
  if(req.method==='GET'&&u.pathname==='/app.js'){
-  const html=page();
-  const marker='<script src="/app.js" defer></script>';
-  const start=html.indexOf(marker);
-  let js='';if(start>=0){js=html.slice(start+marker.length).split('</body>')[0].trim();const close=js.lastIndexOf('</script>');if(close>=0)js=js.slice(0,close).trim();}
-  res.writeHead(200,{'Content-Type':'application/javascript; charset=utf-8','Cache-Control':'no-store'});
-  return res.end(js);
+  const file=path.join(process.cwd(),'hori-control-panel','app.js');
+  try{
+   const js=fs.readFileSync(file,'utf8');
+   res.writeHead(200,{'Content-Type':'application/javascript; charset=utf-8','Cache-Control':'no-store'});
+   return res.end(js);
+  }catch(e){return out(res,{ok:false,error:'app.js: '+e.message},500)}
  }
  if(req.method==='POST'&&u.pathname==='/api/login'){
   const token=panelToken();
