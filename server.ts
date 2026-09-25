@@ -1081,7 +1081,7 @@ async function generateXoriWebAwareReply(systemPrompt: string, userText: string,
     webContext = [search, wikipedia, openWeb, directPages].filter(Boolean).join('\n\n').slice(0, 7500);
   } catch (error) { console.warn('[Xori Web Tool] search failed:', error); }
 
-  if (!webContext) return firstPass.replace(/<search>[\\s\\S]*?<\\/search>/gi, '').trim() || 'Я не смогла получить свежие данные из интернета. Попробуй ещё раз чуть позже.';
+  if (!webContext) return firstPass.replace(/<search>[\s\S]*?<\/search>/gi, '').trim() || 'Я не смогла получить свежие данные из интернета. Попробуй ещё раз чуть позже.';
 
   const groundedPrompt = systemPrompt + `\n\nРезультаты интернет-поиска:\n---\n${webContext}\n---\nОтветь на исходный запрос, опираясь на эти результаты. Не упоминай внутренний инструмент и не выдумывай факты.`;
   const finalReply = await generateTextWithConfiguredProvider(groundedPrompt, userText, history);
