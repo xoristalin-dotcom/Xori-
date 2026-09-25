@@ -1059,6 +1059,51 @@ async function generateTextWithConfiguredProvider(systemPrompt: string, userText
   }
 }
 
+async function generateSpecializedProviderReply(
+  taskType: string,
+  systemPrompt: string,
+  userText: string,
+  history: any[] = [],
+): Promise<string> {
+  // External LLMs are tools for specialized tasks only.
+  // They are never used by the ordinary Xori conversation path.
+  if (taskType === 'generic' || taskType === 'image') return '';
+
+  const providers = getProviderOrderByTask(taskType);
+  const messages = buildChatMessages(systemPrompt, userText, history);
+
+  for (const provider of providers) {
+    if (!provider.enabled || !provider.apiKey || isProviderCoolingDown(provider)) continue;
+
+    try {
+      const reply = await callOpenAICompatible({
+        baseUrl: provider.baseUrl,
+        apiKey: provider.apiKey,
+        model: provider.model,
+        messages,
+        temperature: 0.7,
+      });
+
+      if (!reply) throw new Error('Empty provider response');
+
+      markProviderSuccess(provider);
+      console.log(`[Specialized Router] task=${taskType} provider=${provider.label}`);
+      return reply;
+    } catch (error) {
+      markProviderFailure(provider, error);
+      console.warn(`[Specialized Router] task=${taskType} provider=${provider.label} failed`);
+    }
+  }
+
+  console.warn(`[Specialized Router] no external provider available for task=${taskType}`);
+  return '';
+}
+
+function shouldUseSpecializedProvider(taskType: string): boolean {
+  // Normal conversation is ALWAYS Xori AI.
+  return ['coding', 'error', 'math', 'logic', 'search', 'learning'].includes(taskType);
+}
+
 app.post('/api/web/extract', async (req, res) => {
   const { url } = req.body || {};
   if (!url || typeof url !== 'string') {
@@ -1409,14 +1454,31 @@ async function handleTelegramMessage(chatId: number, text: string, history: any[
   }
 
   const taskType = detectTaskType(cleanText);
-  const hadUsableProvider = hasUsableExternalProvider(taskType);
   let reply = '';
   try {
-    reply = await generateTextWithConfiguredProvider(buildSystemPrompt(), cleanText, history);
+    if (shouldUseSpecializedProvider(taskType)) {
+      reply = await generateSpecializedProviderReply(
+        taskType,
+        buildSystemPrompt(),
+        cleanText,
+        history,
+      );
+    } else {
+      // Hard rule: ordinary Telegram chat uses only Xori AI.
+      reply = await generateTextWithConfiguredProvider(
+        buildSystemPrompt(),
+        cleanText,
+        history,
+      );
+    }
   } catch (err) {
-    console.warn('Telegram AI error:', err);
+    console.warn(`Telegram AI error task=${taskType}:`, err);
   }
-  if (!reply) return 'Я не могу ответить: все API-провайдеры сейчас недоступны. Проверь ключи в Render.';
+  if (!reply) {
+    return shouldUseSpecializedProvider(taskType)
+      ? 'Специализированная модель сейчас недоступна. Попробуй ещё раз чуть позже.'
+      : 'Моя Xori AI сейчас не отвечает. Попробуй ещё раз чуть позже.';
+  }
 
   const decision = decideHoriAction(cleanText, reply, memory);
 
@@ -2205,7 +2267,7 @@ app.get('/api/providers', (req, res) => {
     providers: getProviderStatus(),
     hint: OFFLINE_MODE
       ? 'OFFLINE_MODE=true отключает внешние API.'
-      : 'Настроенные провайдеры пробуются по очереди; ключи намеренно не показываются.',
+      : 'Обычный чат всегда использует только Xori AI; внешние модели используются только для специализированных задач.',
   });
 });
 
@@ -2365,11 +2427,26 @@ app.post('/api/chat', async (req, res) => {
 
   let reply = '';
   const sysPrompt = buildSystemPrompt();
+  const taskType = detectTaskType(cleanText);
 
   try {
-    reply = await generateTextWithConfiguredProvider(sysPrompt, cleanText, Array.isArray(history) ? history : []);
+    if (shouldUseSpecializedProvider(taskType)) {
+      reply = await generateSpecializedProviderReply(
+        taskType,
+        sysPrompt,
+        cleanText,
+        Array.isArray(history) ? history : [],
+      );
+    } else {
+      // Hard rule: ordinary chat uses only the user's own Xori AI.
+      reply = await generateTextWithConfiguredProvider(
+        sysPrompt,
+        cleanText,
+        Array.isArray(history) ? history : [],
+      );
+    }
   } catch (err) {
-    console.warn('AI chat error:', err);
+    console.warn(`AI chat error task=${taskType}:`, err);
   }
 
   if (!reply) {
