@@ -140,7 +140,7 @@ const $=x=>document.getElementById(x);async function api(p,o={}){
   throw e
  }finally{clearTimeout(timer)}
 }
-function nav(){ $('nav').innerHTML=tabs.map(x=>'<button class="'+(x[0]===tab?'on':'')+'" onclick="tab=&quot;'+x[0]+'&quot;;render()">'+x[1]+'</button>').join('')}
+function nav(){ $('nav').innerHTML=tabs.map(x=>'<button type="button" class="'+(x[0]===tab?'on':'')+'" data-tab="'+x[0]+'">'+x[1]+'</button>').join('');document.querySelectorAll('#nav button').forEach(b=>b.addEventListener('click',()=>{tab=b.dataset.tab;history.replaceState(null,'','#'+tab);render();window.scrollTo({top:0,behavior:'smooth'})}))}
 function card(t,b){return '<section class="card"><h3>'+t+'</h3>'+b+'</section>'}
 function saveBtn(label='💾 Сохранить изменения'){return '<div class="savebar"><button class="save" onclick="save()">'+label+'</button><span id="saved">Изменения не сохранены</span></div>'}function inp(k,label,extra=''){return '<label>'+label+'<input value="'+esc(s[k]??'')+'" oninput="s.'+k+'=this.value" '+extra+'></label>'}function esc(x){return String(x).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;')}
 function render(){nav();$('title').textContent=tabs.find(x=>x[0]===tab)[1];let c='';\nif(tab==='keys')c=card('API-ключи и секреты','<p class="muted">Полные значения доступны прямо из панели. Они не записываются в hori-control-config.json.</p><div class="actions"><button class="action" onclick="loadSecrets(true)">🔓 Показать полные ключи</button><button class="action" onclick="loadSecrets(false)">🔒 Скрыть</button></div><div id="secretsBox" class="term">Нажми «Показать полные ключи».</div>');
