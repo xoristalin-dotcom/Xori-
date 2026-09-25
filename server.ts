@@ -50,6 +50,8 @@ const HF_XORI_URL = process.env.HF_XORI_URL || '';
 const HF_XORI_TOKEN = process.env.HF_XORI_TOKEN || process.env.HF_TOKEN || '';
 const INTERNAL_LEARNING_ENABLED = process.env.INTERNAL_LEARNING_ENABLED !== 'false';
 const WEB_SEARCH_ENABLED = process.env.WEB_SEARCH_ENABLED !== 'false';
+const CONTROL_TOKEN = process.env.HORI_CONTROL_TOKEN || '';
+const CONTROL_PATH = path.join(BASE_DIR, 'hori_control.json');
 let internalReplyCounter = 0;
 const providerCooldowns = new Map<string, number>();
 const providerLastErrors = new Map<string, string>();
@@ -81,6 +83,34 @@ function loadJson<T>(filePath: string, fallback: T): T {
 }
 
 // Helper to save JSON
+function getControlState() {
+  return loadJson<any>(CONTROL_PATH, {
+    enabled: true,
+    proactiveEnabled: true,
+    voiceEnabled: true,
+    photoEnabled: true,
+    autoFirst: true,
+    modelMode: 'auto',
+    updatedAt: null,
+  });
+}
+
+function saveControlState(patch: any) {
+  const current = getControlState();
+  const next = {
+    ...current,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  };
+  saveJson(CONTROL_PATH, next);
+  return next;
+}
+
+function controlAuthorized(req: Request): boolean {
+  if (!CONTROL_TOKEN) return false;
+  return req.headers['x-hori-control-token'] === CONTROL_TOKEN;
+}
+
 function saveJson(filePath: string, data: any) {
   try {
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
@@ -1424,6 +1454,8 @@ function buildImagePrompt(text: string, visualReference: string = ''): string {
 }
 
 async function handleTelegramMessage(chatId: number, text: string, history: any[]) {
+  const control = getControlState();
+  if (!control.enabled) return 'Сейчас я отключена в панели управления. Попробуй позже.';
   const { cleanText, warning } = moderateInput(text);
   if (warning) return warning;
   if (!cleanText) return 'Напиши мне что-нибудь.';
@@ -1965,6 +1997,8 @@ function updateConversationState(memory: any, userText: string, reply: string, d
 
 async function maybeSendProactiveTelegramMessage() {
   if (!TELEGRAM_BOT_TOKEN) return;
+  const control = getControlState();
+  if (!control.enabled || !control.proactiveEnabled) return;
 
   const memory = ensureMemoryState(loadJson<any>(MEMORY_PATH, {
     user_name: 'мой хороший',
@@ -2019,10 +2053,10 @@ async function maybeSendProactiveTelegramMessage() {
     const chatId = Number(memory.last_chat_id);
     await sendTelegramReply(chatId, finalText);
 
-    if (decision.sendVoice && TELEGRAM_VOICE_URL) {
+    if (decision.sendVoice && control.voiceEnabled && TELEGRAM_VOICE_URL) {
       await sendTelegramVoice(chatId, finalText).catch((err) => console.warn('Proactive voice failed:', err));
     }
-    if (decision.sendImage) {
+    if (decision.sendImage && control.photoEnabled) {
       const visualReference = isHoriSelfPhotoRequest(finalText) ? await fetchHoriVisualReference() : '';
       const imagePrompt = buildImagePrompt(finalText, visualReference);
       await sendTelegramPhoto(chatId, imagePrompt, '').catch((err) => console.warn('Proactive photo failed:', err));
@@ -2212,6 +2246,40 @@ app.post('/api/xori', async (req, res) => {
       error: 'Xori local model failed',
       detail: error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
     });
+  }
+});
+
+app.get('/api/control', (req, res) => {
+  const control = getControlState();
+  res.json({
+    ok: true,
+    ...control,
+    tokenConfigured: Boolean(CONTROL_TOKEN),
+  });
+});
+
+app.post('/api/control', (req, res) => {
+  if (!controlAuthorized(req)) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+  const allowed = ['enabled', 'proactiveEnabled', 'voiceEnabled', 'photoEnabled', 'autoFirst', 'modelMode'];
+  const patch: any = {};
+  for (const key of allowed) {
+    if (req.body && Object.prototype.hasOwnProperty.call(req.body, key)) patch[key] = req.body[key];
+  }
+  const control = saveControlState(patch);
+  console.log('[CONTROL] updated', JSON.stringify(control));
+  res.json({ ok: true, ...control });
+});
+
+app.post('/api/control/test-message', async (req, res) => {
+  if (!controlAuthorized(req)) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+  const chatId = Number(req.body?.chatId);
+  const text = String(req.body?.text || '').trim();
+  if (!Number.isFinite(chatId) || !text) return res.status(400).json({ ok: false, error: 'chatId и text обязательны' });
+  try {
+    await sendTelegramReply(chatId, text);
+    res.json({ ok: true, sent: true });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error instanceof Error ? error.message : String(error) });
   }
 });
 
