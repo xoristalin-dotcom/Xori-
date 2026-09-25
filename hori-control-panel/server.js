@@ -43,7 +43,7 @@ if(tab==='colab')c=card('Google Colab / обучение',inp('colabUrl','Notebo
 if(tab==='github')c=card('GitHub',inp('githubRepo','Репозиторий')+'<label>Ветка<input value="'+esc(s.githubBranch||'main')+'" oninput="s.githubBranch=this.value"></label><div class="actions"><button class="action" onclick="githubStatus()">🧪 Проверить GitHub API</button><button class="action" onclick="openURL(\'https://github.com/\'+s.githubRepo)">↗ Открыть репозиторий</button></div>'+saveBtn('💾 Сохранить GitHub'));
 if(tab==='logs')c=card('Живые логи','<div class="actions"><button class="action" onclick="refreshLogs()">🔄 Обновить</button></div><br><div class="term">'+logs.map(x=>'['+new Date(x.time).toLocaleTimeString()+'] '+x.message).join('\n')+'</div>');
 $('content').innerHTML=c}
-async function load(){try{s=await api('/api/config');$('status').textContent='Сервер подключён'}catch(e){$('status').textContent='Ошибка API'}render();refreshLogs()}
+async function load(){render();$('status').textContent='Подключение…';try{s=await api('/api/config');$('status').textContent='Сервер подключён ✓';render()}catch(e){$('status').textContent='API недоступен';console.error(e)}finally{refreshLogs()}}
 async function save(){try{await api('/api/config',{method:'PUT',body:JSON.stringify(s)});$('status').textContent='Сохранено ✓';if($('saved'))$('saved').textContent='Сохранено '+new Date().toLocaleTimeString();refreshLogs()}catch(e){$('status').textContent=e.message}}
 async function refreshLogs(){try{logs=await api('/api/logs');if(tab==='logs')render()}catch{}}
 async function renderStatus(){try{let d=await api('/api/render/status');$('status').textContent='Render HTTP '+d.status;refreshLogs()}catch(e){$('status').textContent=e.message}}
@@ -51,6 +51,6 @@ async function githubStatus(){try{let d=await api('/api/github/repo');$('status'
 async function testHF(){try{let d=await api('/api/hf/status');$('status').textContent='HF HTTP '+d.status;refreshLogs()}catch(e){$('status').textContent=e.message}}
 async function testModel(){try{let d=await api('/api/model/test',{method:'POST',body:JSON.stringify({payload:{prompt:'Ответь одним коротким предложением: привет'}})});$('status').textContent='Model HTTP '+d.status;refreshLogs()}catch(e){$('status').textContent=e.message}}
 function openURL(x){if(x)window.open(x,'_blank')}
-load();setInterval(refreshLogs,4000);
+load();setInterval(refreshLogs,10000);
 </script></body></html>`}
 http.createServer((req,res)=>handler(req,res).catch(e=>{log('ERROR '+e.message);out(res,{ok:false,error:e.message},500)})).listen(port,()=>log('Hori Control started on '+port));
