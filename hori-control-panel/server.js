@@ -12,8 +12,9 @@ function log(x){logs.unshift({time:new Date().toISOString(),message:x});logs.spl
 async function json(req){let s='';for await(const c of req)s+=c;return s?JSON.parse(s):{}}
 async function apiFetch(url,opt={}){return fetch(url,opt)}
 async function handler(req,res){
+ console.log(`[HTTP] ${req.method} ${req.url}`);
  const u=new URL(req.url,'http://localhost');
- if(req.method==='GET'&&u.pathname==='/api/health')return out(res,{ok:true,time:new Date().toISOString()});
+ if(req.method==='GET'&&u.pathname==='/api/health')return out(res,{ok:true,service:'hori-control',time:new Date().toISOString(),pid:process.pid});
  if(req.method==='GET'&&u.pathname==='/api/config'){log('GET /api/config');return out(res,{...state,secrets:{render:!!process.env.RENDER_API_TOKEN,github:!!process.env.GITHUB_TOKEN,hf:!!process.env.HF_TOKEN,cloudflare:!!process.env.CLOUDFLARE_API_TOKEN}})}
  if(req.method==='GET'&&u.pathname==='/api/logs')return out(res,logs);
  if(req.method==='PUT'&&u.pathname==='/api/config'){Object.assign(state,await json(req));try{fs.writeFileSync(configFile,JSON.stringify(state,null,2))}catch(e){log('Не удалось записать config: '+e.message)}log('Конфигурация сохранена кнопкой');return out(res,{ok:true,config:state})}
@@ -77,6 +78,9 @@ async function githubStatus(){try{let d=await api('/api/github/repo');$('status'
 async function testHF(){try{let d=await api('/api/hf/status');$('status').textContent='HF HTTP '+d.status;refreshLogs()}catch(e){$('status').textContent=e.message}}
 async function testModel(){try{let d=await api('/api/model/test',{method:'POST',body:JSON.stringify({payload:{prompt:'Ответь одним коротким предложением: привет'}})});$('status').textContent='Model HTTP '+d.status;refreshLogs()}catch(e){$('status').textContent=e.message}}
 function openURL(x){if(x)window.open(x,'_blank')}
+window.addEventListener('error',e=>{console.error('Hori Control JS error:',e.message);const el=$('status');if(el)el.textContent='Ошибка JS: '+e.message});
+window.addEventListener('unhandledrejection',e=>{console.error('Hori Control promise error:',e.reason);const el=$('status');if(el)el.textContent='Ошибка: '+(e.reason?.message||e.reason)});
+console.log('Hori Control frontend boot',new Date().toISOString());
 load();setInterval(refreshLogs,10000);
 </script></body></html>`}
 http.createServer((req,res)=>handler(req,res).catch(e=>{log('ERROR '+e.message);out(res,{ok:false,error:e.message},500)})).listen(port,()=>log('Hori Control started on '+port));
