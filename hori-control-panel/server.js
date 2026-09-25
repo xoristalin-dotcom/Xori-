@@ -26,7 +26,7 @@ async function handler(req,res){
   const html=page();
   const marker='<script src="/app.js" defer></script>';
   const start=html.indexOf(marker);
-  const js=start>=0?html.slice(start+marker.length).split('</body>')[0].replace(/<\\/script>\\s*$/,'').trim():'';
+  let js='';if(start>=0){js=html.slice(start+marker.length).split('</body>')[0].trim();const close=js.lastIndexOf('</script>');if(close>=0)js=js.slice(0,close).trim();}
   res.writeHead(200,{'Content-Type':'application/javascript; charset=utf-8','Cache-Control':'no-store'});
   return res.end(js);
  }
