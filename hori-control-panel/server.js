@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import http from 'node:http';
 import {URL} from 'node:url';
 import fs from 'node:fs';
