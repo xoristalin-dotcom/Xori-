@@ -4,7 +4,6 @@ const targets = ['server.ts', 'dist/server.cjs'];
 
 for (const path of targets) {
   if (!fs.existsSync(path)) continue;
-
   let s = fs.readFileSync(path, 'utf8');
 
   if (!s.includes("const PROACTIVE_CHAT_ID")) {
