@@ -22,8 +22,7 @@ function loadDotEnvFromProjectAndHome() {
     if (!fs.existsSync(filePath)) continue;
 
     const content = fs.readFileSync(filePath, 'utf-8');
-    for (const rawLine of content.split(/\r?
-/)) {
+    for (const rawLine of content.split(/\r?\n/)) {
       const line = rawLine.trim();
       if (!line || line.startsWith('#') || !line.includes('=')) continue;
 
