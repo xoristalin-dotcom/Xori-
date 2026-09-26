@@ -2023,7 +2023,12 @@ async function maybeSendProactiveTelegramMessage() {
   if (!memory.last_chat_id) return;
 
   if (!memory.next_proactive_at) {
-    const delay = 4 * 60 * 60 * 1000 + Math.random() * (8 * 60 * 60 * 1000);
+    // autoFirst means Hori may initiate the conversation after the user has
+    // already opened the chat. Keep a short randomized delay instead of the
+    // old 4-12 hour window, while the 6h anti-spam guard remains in force.
+    const delay = control.autoFirst
+      ? 2 * 60 * 1000 + Math.random() * (8 * 60 * 1000)
+      : 4 * 60 * 60 * 1000 + Math.random() * (8 * 60 * 60 * 1000);
     memory.next_proactive_at = new Date(Math.max(lastInteraction, now) + delay).toISOString();
     saveJson(MEMORY_PATH, memory);
     return;
@@ -2053,7 +2058,9 @@ async function maybeSendProactiveTelegramMessage() {
     const chatId = Number(memory.last_chat_id);
     await sendTelegramReply(chatId, finalText);
 
-    if (decision.sendVoice && control.voiceEnabled && TELEGRAM_VOICE_URL) {
+    if (decision.sendVoice && control.voiceEnabled) {
+      // sendTelegramVoice has a free node-edge-tts fallback, so a configured
+      // TELEGRAM_VOICE_URL is not required for voice mode.
       await sendTelegramVoice(chatId, finalText).catch((err) => console.warn('Proactive voice failed:', err));
     }
     if (decision.sendImage && control.photoEnabled) {
@@ -2349,7 +2356,12 @@ app.get('/api/autonomy', (req, res) => {
   res.json({
     ok: true,
     autonomy: true,
-    proactive: Boolean(TELEGRAM_BOT_TOKEN && memory.last_chat_id),
+    proactive: Boolean(
+      TELEGRAM_BOT_TOKEN &&
+      memory.last_chat_id &&
+      getControlState().enabled &&
+      getControlState().proactiveEnabled
+    ),
     next_proactive_at: memory.next_proactive_at || null,
     last_proactive_message: memory.last_proactive_message || null,
     conversation_state: state,
