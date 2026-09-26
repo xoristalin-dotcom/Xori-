@@ -40,6 +40,14 @@ const execFileAsync = promisify(execFile);
 
 loadDotEnvFromProjectAndHome();
 
+function requireStudioAdmin(req: any, res: any, next: any) {
+  const expected = String(process.env.STUDIO_ADMIN_TOKEN || '').trim();
+  if (!expected) return res.status(503).json({ error: 'Studio admin token is not configured' });
+  const auth = String(req.headers.authorization || '');
+  if (auth !== 'Bearer ' + expected) return res.status(401).json({ error: 'Studio admin authorization required' });
+  next();
+}
+
 const app = express();
 const PORT = Number.parseInt(process.env.PORT || '3000', 10);
 const OFFLINE_MODE = process.env.OFFLINE_MODE === 'true' || process.env.OFFLINE_MODE === '1';
@@ -2618,7 +2626,7 @@ function buildTrainingManifest(datasetSize: number, candidateId: string) {
   };
 }
 
-app.post('/api/studio/training/prepare', (req, res) => {
+app.post(', requireStudioAdmin/api/studio/training/prepare', (req, res) => {
   const examples = buildTrainingDataset();
   if (examples.length < 10) {
     return res.status(400).json({ ok: false, error: 'Нужно минимум 10 подтверждённых примеров', count: examples.length });
@@ -2652,7 +2660,7 @@ app.get('/api/studio/training/dataset/:candidateId', (req, res) => {
   res.download(filePath, req.params.candidateId + '.jsonl');
 });
 
-app.post('/api/studio/training/run', async (req, res) => {
+app.post(', requireStudioAdmin/api/studio/training/run', async (req, res) => {
   const candidateId = String(req.body?.candidateId || '');
   if (!candidateId) return res.status(400).json({ error: 'candidateId is required' });
   const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
@@ -2698,7 +2706,7 @@ app.post('/api/studio/training/run', async (req, res) => {
   }
 });
 
-app.post('/api/studio/training/:candidateId/test', async (req, res) => {
+app.post(', requireStudioAdmin/api/studio/training/:candidateId/test', async (req, res) => {
   const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
   const candidate = (versions.candidates || []).find((x: any) => x.id === req.params.candidateId);
   if (!candidate) return res.status(404).json({ error: 'candidate not found' });
@@ -2715,7 +2723,7 @@ app.post('/api/studio/training/:candidateId/test', async (req, res) => {
   res.json({ ok: true, candidate });
 });
 
-app.post('/api/studio/versions/:candidateId/promote', (req, res) => {
+app.post(', requireStudioAdmin/api/studio/versions/:candidateId/promote', (req, res) => {
   const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
   const candidate = (versions.candidates || []).find((x: any) => x.id === req.params.candidateId);
   if (!candidate) return res.status(404).json({ error: 'candidate not found' });
@@ -2736,7 +2744,7 @@ app.get('/api/studio/training', (req, res) => {
   res.json(loadTrainingQueue());
 });
 
-app.post('/api/studio/training', (req, res) => {
+app.post(', requireStudioAdmin/api/studio/training', (req, res) => {
   const body = req.body || {};
   const user = typeof body.user === 'string' ? body.user.trim() : '';
   const assistant = typeof body.assistant === 'string' ? body.assistant.trim() : '';
@@ -2758,7 +2766,7 @@ app.post('/api/studio/training', (req, res) => {
   res.json({ ok: true, item: queue.items[0], queue });
 });
 
-app.patch('/api/studio/training/:id', (req, res) => {
+app.patch(', requireStudioAdmin/api/studio/training/:id', (req, res) => {
   const queue = loadTrainingQueue();
   const item = queue.items.find((x: any) => x.id === req.params.id);
   if (!item) return res.status(404).json({ error: 'training item not found' });
