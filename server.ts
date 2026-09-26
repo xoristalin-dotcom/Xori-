@@ -1037,67 +1037,63 @@ async function generateTextWithConfiguredProvider(systemPrompt: string, userText
   }
 
   const messages = buildChatMessages(systemPrompt, userText, history);
+  let lastError = '';
 
-  try {
-    const response = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/meta/llama-3.2-3b-instruct`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiToken}`,
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/meta/llama-3.2-3b-instruct`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiToken}`,
+          },
+          body: JSON.stringify({
+            messages,
+            lora: fineTuneId,
+            raw: true,
+            max_tokens: 512,
+            temperature: 0.7,
+          }),
+          signal: AbortSignal.timeout(60000),
         },
-        body: JSON.stringify({
-          messages,
-          lora: fineTuneId,
-          raw: true,
-          max_tokens: 512,
-          temperature: 0.7,
-        }),
-        signal: AbortSignal.timeout(60000),
-      },
-    );
+      );
 
-    let lastError = '';
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      try {
-        const data = await response.json() as any;
+      const data = await response.json() as any;
 
-        if (!response.ok || data?.success === false) {
-          lastError = `HTTP ${response.status}: ${JSON.stringify(data).slice(0, 900)}`;
-          console.error(`[Cloudflare Xori] request failed attempt=${attempt}/3: ${lastError}`);
-          if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
-          continue;
-        }
-
-        const content =
-          data?.result?.choices?.[0]?.message?.content ||
-          data?.result?.response ||
-          '';
-
-        if (typeof content !== 'string' || !content.trim()) {
-          lastError = 'empty model response';
-          console.error(`[Cloudflare Xori] Empty model response attempt=${attempt}/3`);
-          if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
-          continue;
-        }
-
-        console.log(
-          `[Cloudflare Xori] success fine-tune=${fineTuneId} attempt=${attempt} model=${data?.result?.model || '@cf/meta/llama-3.2-3b-instruct'}`,
-        );
-        return content.trim();
-      } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error);
-        console.error(`[Cloudflare Xori] response parse error attempt=${attempt}/3: ${lastError}`);
+      if (!response.ok || data?.success === false) {
+        lastError = `HTTP ${response.status}: ${JSON.stringify(data).slice(0, 900)}`;
+        console.error(`[Cloudflare Xori] request failed attempt=${attempt}/3: ${lastError}`);
         if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
+        continue;
       }
+
+      const content =
+        data?.result?.choices?.[0]?.message?.content ||
+        data?.result?.response ||
+        '';
+
+      if (typeof content !== 'string' || !content.trim()) {
+        lastError = 'empty model response';
+        console.error(`[Cloudflare Xori] Empty model response attempt=${attempt}/3`);
+        if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
+        continue;
+      }
+
+      console.log(
+        `[Cloudflare Xori] success fine-tune=${fineTuneId} attempt=${attempt} model=${data?.result?.model || '@cf/meta/llama-3.2-3b-instruct'}`,
+      );
+      return content.trim();
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      console.error(`[Cloudflare Xori] inference error attempt=${attempt}/3: ${lastError}`);
+      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
     }
-    console.error('[Cloudflare Xori] all retry attempts failed:', lastError);
-    return '';
-  } catch (error) {
-    console.error('[Cloudflare Xori] inference error:', error);
-    return '';
   }
+
+  console.error('[Cloudflare Xori] all retry attempts failed:', lastError);
+  return '';
 }
 
 async function generateSpecializedProviderReply(
