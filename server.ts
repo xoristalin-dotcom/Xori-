@@ -538,14 +538,11 @@ async function fetchWebContextFromUrls(text: string): Promise<string> {
   for (const url of urls) {
     const snapshot = await fetchPageSnapshot(url);
     if (!snapshot) continue;
-    snapshots.push(`Источник: ${snapshot.title}
-Ссылка: ${snapshot.url}
-Содержание: ${snapshot.text}`);
+    snapshots.push(`Источник: ${snapshot.title}\\nСсылка: ${snapshot.url}\\nСодержание: ${snapshot.text}`);
   }
 
-  return snapshots.join('
+  return snapshots.join('\\n\\n').slice(0, 3500);
 
-').slice(0, 3500);
 }
 
 async function fetchWebContext(text: string): Promise<string> {
