@@ -82,13 +82,14 @@ if(req.method==='POST'&&u.pathname==='/api/render/sync-env'){return out(res,{ok:
  if(req.method==='GET'&&u.pathname==='/api/model/test'){
   if(!state.botUrl)return out(res,{ok:false,error:'BOT URL не задан'},400);
   const prompt=String(u.searchParams.get('prompt')||'Ответь одним коротким предложением: привет');
+  const startedAt=Date.now();
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),25000);
   try{
    const r=await apiFetch(state.botUrl+'/api/xori',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:prompt,history:[]}),signal:controller.signal});
    const raw=await r.text(); let d={}; try{d=JSON.parse(raw)}catch{d={raw:raw.slice(0,4000)}}
    log('Xori live model GET test HTTP '+r.status);
-   return out(res,{ok:r.ok,status:r.status,body:d,provider:d.provider||'xori-local',model:d.model||state.model},r.ok?200:r.status);
+   return out(res,{ok:r.ok,status:r.status,latencyMs:Date.now()-startedAt,body:d,provider:d.provider||'xori-local',model:d.model||state.model},r.ok?200:r.status);
   }catch(e){
    const timed=e?.name==='AbortError';
    log('Xori live model GET test '+(timed?'TIMEOUT':'ERROR'));
