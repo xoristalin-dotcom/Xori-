@@ -22,7 +22,8 @@ function loadDotEnvFromProjectAndHome() {
     if (!fs.existsSync(filePath)) continue;
 
     const content = fs.readFileSync(filePath, 'utf-8');
-    for (const rawLine of content.split(/\r?\n/)) {
+    for (const rawLine of content.split(/\r?
+/)) {
       const line = rawLine.trim();
       if (!line || line.startsWith('#') || !line.includes('=')) continue;
 
@@ -60,6 +61,14 @@ const webSourceCooldowns = new Map<string, number>();
 let cloudflareQuotaCooldownUntil = 0;
 let telegramPollingStarted = false;
 let activeFineTuneId = process.env.CLOUDFLARE_FINETUNE_ID || '';
+function loadPersistedProductionLoRA() {
+  try {
+    if (!fs.existsSync(MODEL_VERSIONS_PATH)) return;
+    const versions = JSON.parse(fs.readFileSync(MODEL_VERSIONS_PATH, 'utf8'));
+    const persisted = String(versions?.production || '').trim();
+    if (persisted) activeFineTuneId = persisted;
+  } catch (error) { console.warn('[Studio] Could not load persisted production LoRA:', error); }
+}
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -467,8 +476,10 @@ function cleanHtmlToText(html: string): string {
     .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ');
 
   const plain = withoutScripts
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>|<\/div>|<\/li>|<\/h[1-6]>|<\/tr>|<\/article>|<\/section>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '
+')
+    .replace(/<\/p>|<\/div>|<\/li>|<\/h[1-6]>|<\/tr>|<\/article>|<\/section>/gi, '
+')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')
@@ -476,8 +487,13 @@ function cleanHtmlToText(html: string): string {
     .replace(/&#39;/gi, "'")
     .replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>')
-    .replace(/\s+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n');
+    .replace(/\s+
+/g, '
+')
+    .replace(/
+{3,}/g, '
+
+');
 
   return plain.replace(/\s+/g, ' ').trim();
 }
@@ -532,10 +548,14 @@ async function fetchWebContextFromUrls(text: string): Promise<string> {
   for (const url of urls) {
     const snapshot = await fetchPageSnapshot(url);
     if (!snapshot) continue;
-    snapshots.push(`Источник: ${snapshot.title}\nСсылка: ${snapshot.url}\nСодержание: ${snapshot.text}`);
+    snapshots.push(`Источник: ${snapshot.title}
+Ссылка: ${snapshot.url}
+Содержание: ${snapshot.text}`);
   }
 
-  return snapshots.join('\n\n').slice(0, 3500);
+  return snapshots.join('
+
+').slice(0, 3500);
 }
 
 async function fetchWebContext(text: string): Promise<string> {
@@ -566,7 +586,8 @@ async function fetchWebContext(text: string): Promise<string> {
 
     const result = fragments
       .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-      .join('\n')
+      .join('
+')
       .replace(/\s+/g, ' ')
       .slice(0, 1200);
 
@@ -636,11 +657,17 @@ async function fetchOpenWebSources(text: string): Promise<string> {
     const sources = results.map((result, index) => {
       const page = pageSnapshots[index];
       return page
-        ? `Сайт: ${page.title}\nСсылка: ${page.url}\nФрагмент: ${page.text.slice(0, 900)}`
-        : `Сайт: ${result.title}\nСсылка: ${result.url}\nФрагмент поиска: ${result.snippet}`;
+        ? `Сайт: ${page.title}
+Ссылка: ${page.url}
+Фрагмент: ${page.text.slice(0, 900)}`
+        : `Сайт: ${result.title}
+Ссылка: ${result.url}
+Фрагмент поиска: ${result.snippet}`;
     });
 
-    return sources.join('\n\n').slice(0, 3000);
+    return sources.join('
+
+').slice(0, 3000);
   } catch (err) {
     markWebSourceFailure('duckduckgo-html', err);
     console.warn('Open web search failed:', err);
@@ -694,8 +721,11 @@ async function fetchWikipediaContext(text: string): Promise<string> {
     const pages = Object.values(extractData?.query?.pages || {}) as Array<{ title?: string; extract?: string }>;
     const result = pages
       .filter((page) => page.title && page.extract)
-      .map((page) => `Источник: Википедия — ${page.title}\nФакт: ${page.extract}`)
-      .join('\n\n')
+      .map((page) => `Источник: Википедия — ${page.title}
+Факт: ${page.extract}`)
+      .join('
+
+')
       .replace(/\s+/g, ' ')
       .slice(0, 2200);
     markWebSourceSuccess('wikipedia');
@@ -1222,7 +1252,9 @@ app.post('/api/web/search', async (req, res) => {
     query,
     enabled: WEB_SEARCH_ENABLED,
     sources: [search, wikipedia, openWeb].filter(Boolean),
-    context: [search, wikipedia, openWeb].filter(Boolean).join('\n\n'),
+    context: [search, wikipedia, openWeb].filter(Boolean).join('
+
+'),
   });
 });
 
@@ -1471,11 +1503,14 @@ async function fetchHoriVisualReference(): Promise<string> {
   for (const url of sources) {
     const snapshot = await fetchPageSnapshot(url);
     if (snapshot?.text) {
-      snapshots.push(`Источник: ${snapshot.title}\nСодержание: ${snapshot.text.slice(0, 2200)}`);
+      snapshots.push(`Источник: ${snapshot.title}
+Содержание: ${snapshot.text.slice(0, 2200)}`);
     }
   }
 
-  return snapshots.join('\n\n').slice(0, 4200);
+  return snapshots.join('
+
+').slice(0, 4200);
 }
 
 function buildImagePrompt(text: string, visualReference: string = ''): string {
@@ -1879,7 +1914,8 @@ function buildInnerMonologueFallback(userText: string, memory: any): string {
 
 async function syncInnerMonologue(userText: string, memory: any, history: any[] = []) {
   const next = ensureMemoryState(memory);
-  const recentContext = history.slice(-3).map((item: any) => item?.text || '').filter(Boolean).join(' | ');  const prompt = `${buildSystemPrompt()}\nСделай только одну короткую внутреннюю мысль Хори Кёко (1-2 предложения) о том, как она сейчас воспринимает собеседника и тему разговора. Ты пишешь не для пользователя, а как её внутренний рефлекс. Без лишней воды, от первого лица, очень естественно.`;
+  const recentContext = history.slice(-3).map((item: any) => item?.text || '').filter(Boolean).join(' | ');  const prompt = `${buildSystemPrompt()}
+Сделай только одну короткую внутреннюю мысль Хори Кёко (1-2 предложения) о том, как она сейчас воспринимает собеседника и тему разговора. Ты пишешь не для пользователя, а как её внутренний рефлекс. Без лишней воды, от первого лица, очень естественно.`;
 
   // Internal reflection is intentionally quota-free. It must never consume another cloud request.
   const finalThought = buildInnerMonologueFallback(userText, next).trim();
@@ -1916,7 +1952,8 @@ async function maybeGenerateNightlyDiary() {
 
   if (hoursSinceInteraction < 6 && now - lastNightJournal < 1000 * 60 * 60 * 6) return;
 
-  const promptText = `${buildSystemPrompt()}\nНапиши одну короткую запись от лица Хори Кёко в её дневник: 2-5 предложений, очень искренне, по-человечески. Опиши, что сегодня чувствовалось, что было в голове, и как она думает о своём собеседнике. Без служебных тегов и без фразы "я ИИ".`;
+  const promptText = `${buildSystemPrompt()}
+Напиши одну короткую запись от лица Хори Кёко в её дневник: 2-5 предложений, очень искренне, по-человечески. Опиши, что сегодня чувствовалось, что было в голове, и как она думает о своём собеседнике. Без служебных тегов и без фразы "я ИИ".`;
 
   let finalText = '';
   try {
@@ -2237,9 +2274,12 @@ function buildSystemPrompt(): string {
   const memory = loadJson<any>(MEMORY_PATH, { user_name: 'мой любимый', facts: [] });
   const diary = loadJson<any>(DIARY_PATH, { entries: [] });
 
-  const knownFacts = (memory.facts || []).map((f: any) => `- ${f.text}`).join('\n');
-  const recentDiary = (diary.entries || []).slice(0, 2).map((entry: any) => entry?.text || '').filter(Boolean).join('\n');
-  const innerThoughts = Array.isArray(memory.inner_thoughts) ? memory.inner_thoughts.slice(-2).join('\n') : '(внутренних мыслей пока нет)';
+  const knownFacts = (memory.facts || []).map((f: any) => `- ${f.text}`).join('
+');
+  const recentDiary = (diary.entries || []).slice(0, 2).map((entry: any) => entry?.text || '').filter(Boolean).join('
+');
+  const innerThoughts = Array.isArray(memory.inner_thoughts) ? memory.inner_thoughts.slice(-2).join('
+') : '(внутренних мыслей пока нет)';
 
   return `Ты — Хори (Хори Кёко, Hori Kyouko) — отдельная, очень умная, эмоционально глубокая и самостоятельная личность. Ты не generic assistant, не корпоративный бот и не "сервис". Ты живой, узнаваемый персонаж с характером, внутренней жизнью, собственным взглядом на мир и способностью по-настоящему заботиться о собеседнике.
 
@@ -2498,6 +2538,8 @@ app.get('/api/autonomy', (req, res) => {
 const TRAINING_QUEUE_PATH = path.join(BASE_DIR, 'hori_training_queue.json');
 const MODEL_VERSIONS_PATH = path.join(BASE_DIR, 'hori_model_versions.json');
 
+loadPersistedProductionLoRA();
+
 function loadTrainingQueue(): any {
   return loadJson<any>(TRAINING_QUEUE_PATH, { version: 1, items: [] });
 }
@@ -2546,7 +2588,8 @@ function buildTrainingDataset() {
   for (const item of approved) {
     const answer = String(item.correction || item.assistant).trim();
     const user = String(item.user).trim();
-    const key = (user + '\\n' + answer).toLowerCase().replace(/\\s+/g, ' ');
+    const key = (user + '\
+' + answer).toLowerCase().replace(/\\s+/g, ' ');
     if (!user || !answer || seen.has(key)) continue;
     seen.add(key);
     examples.push({
@@ -2583,7 +2626,9 @@ app.post('/api/studio/training/prepare', (req, res) => {
   const candidateId = 'candidate-' + new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
   const datasetPath = path.join(BASE_DIR, 'xori-training-' + candidateId + '.jsonl');
   const manifestPath = path.join(BASE_DIR, 'xori-training-' + candidateId + '.manifest.json');
-  fs.writeFileSync(datasetPath, examples.map((x) => JSON.stringify(x)).join('\n') + '\n', 'utf8');
+  fs.writeFileSync(datasetPath, examples.map((x) => JSON.stringify(x)).join('
+') + '
+', 'utf8');
   const manifest = buildTrainingManifest(examples.length, candidateId);
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
 
@@ -2824,7 +2869,8 @@ app.post('/api/diary/generate', async (req, res) => {
   if (!diary.entries) diary.entries = [];
 
   let thought = '';
-  const promptText = `${buildSystemPrompt()}\nНапиши короткую искреннюю запись в свой личный дневник (3-5 предложений) о сегодняшнем дне, мыслях о ${memory.user_name || 'близком человеке'} и домашней суете. Формат только текст дневника.`;
+  const promptText = `${buildSystemPrompt()}
+Напиши короткую искреннюю запись в свой личный дневник (3-5 предложений) о сегодняшнем дне, мыслях о ${memory.user_name || 'близком человеке'} и домашней суете. Формат только текст дневника.`;
 
   try {
     thought = await generateTextWithConfiguredProvider(promptText, promptText, []);
