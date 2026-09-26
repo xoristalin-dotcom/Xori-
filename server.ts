@@ -2694,6 +2694,29 @@ app.post('/api/studio/training/callback', (req, res) => {
   res.json({ ok: true, candidate });
 });
 
+app.get('/api/studio/training/claim', (req, res) => {
+  const expected = process.env.TRAINING_RUNNER_TOKEN || '';
+  const auth = String(req.headers.authorization || '');
+  if (expected && auth !== 'Bearer ' + expected) return res.status(401).json({ error: 'runner unauthorized' });
+
+  const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
+  const candidate = (versions.candidates || []).find((x: any) => x.status === 'queued');
+  if (!candidate) return res.status(204).end();
+
+  candidate.status = 'training';
+  candidate.startedAt = new Date().toISOString();
+  candidate.message = 'GPU runner забрал задачу.';
+  saveJson(MODEL_VERSIONS_PATH, versions);
+
+  const base = req.protocol + '://' + req.get('host');
+  res.json({
+    candidateId: candidate.id,
+    manifest: candidate.manifest,
+    datasetUrl: new URL('/api/studio/training/dataset/' + candidate.id, base).toString(),
+    callbackUrl: new URL('/api/studio/training/callback', base).toString()
+  });
+});
+
 app.post('/api/studio/training/run', async (req, res) => {
   const candidateId = String(req.body?.candidateId || '');
   if (!candidateId) return res.status(400).json({ error: 'candidateId is required' });
@@ -2703,8 +2726,9 @@ app.post('/api/studio/training/run', async (req, res) => {
 
   const runnerUrl = process.env.TRAINING_RUNNER_URL || '';
   if (!runnerUrl) {
-    candidate.status = 'waiting_for_gpu';
-    candidate.message = 'GPU runner не настроен. Dataset и manifest готовы; Production не изменён.';
+    candidate.status = 'queued';
+    candidate.queuedAt = new Date().toISOString();
+    candidate.message = 'Задача поставлена в GPU-очередь. Colab/GPU runner заберёт её автоматически.';
     saveJson(MODEL_VERSIONS_PATH, versions);
     return res.status(202).json({ ok: true, status: candidate.status, candidate });
   }
