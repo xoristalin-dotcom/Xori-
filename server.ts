@@ -573,8 +573,7 @@ async function fetchWebContext(text: string): Promise<string> {
 
     const result = fragments
       .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-      .join('
-')
+      .join(' ')
       .replace(/\s+/g, ' ')
       .slice(0, 1200);
 
