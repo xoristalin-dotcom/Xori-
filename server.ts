@@ -2514,6 +2514,94 @@ app.get('/api/autonomy', (req, res) => {
   });
 });
 
+// Studio API: training queue, runtime diagnostics and model version metadata.
+const TRAINING_QUEUE_PATH = path.join(BASE_DIR, 'hori_training_queue.json');
+const MODEL_VERSIONS_PATH = path.join(BASE_DIR, 'hori_model_versions.json');
+
+function loadTrainingQueue(): any {
+  return loadJson<any>(TRAINING_QUEUE_PATH, { version: 1, items: [] });
+}
+
+function saveTrainingQueue(queue: any): void {
+  saveJson(TRAINING_QUEUE_PATH, queue);
+}
+
+app.get('/api/studio/overview', (req, res) => {
+  const memory = ensureMemoryState(loadJson<any>(MEMORY_PATH, {}));
+  const queue = loadTrainingQueue();
+  const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
+  const diary = loadJson<any>(DIARY_PATH, { entries: [] });
+  res.json({
+    ok: true,
+    xori: {
+      status: 'ok',
+      model: '@cf/meta/llama-3.2-3b-instruct',
+      lora: process.env.CLOUDFLARE_FINETUNE_ID ? 'configured' : 'missing',
+      quotaCooldown: cloudflareQuotaCooldownUntil > Date.now(),
+    },
+    memory: {
+      user_name: memory.user_name,
+      mood: memory.mood,
+      emotion: memory.emotion,
+      energy: memory.energy,
+      facts: Array.isArray(memory.facts) ? memory.facts.length : 0,
+      conversations: Array.isArray(memory.conversations) ? memory.conversations.length : 0,
+    },
+    training: {
+      total: queue.items.length,
+      approved: queue.items.filter((x: any) => x.status === 'approved').length,
+      pending: queue.items.filter((x: any) => x.status === 'pending').length,
+      ignored: queue.items.filter((x: any) => x.status === 'ignored').length,
+    },
+    versions,
+    diary: { total: Array.isArray(diary.entries) ? diary.entries.length : 0 },
+  });
+});
+
+app.get('/api/studio/training', (req, res) => {
+  res.json(loadTrainingQueue());
+});
+
+app.post('/api/studio/training', (req, res) => {
+  const body = req.body || {};
+  const user = typeof body.user === 'string' ? body.user.trim() : '';
+  const assistant = typeof body.assistant === 'string' ? body.assistant.trim() : '';
+  const correction = typeof body.correction === 'string' ? body.correction.trim() : '';
+  const status = body.status === 'ignored' ? 'ignored' : body.status === 'approved' ? 'approved' : 'pending';
+  if (!user || !assistant) return res.status(400).json({ error: 'user and assistant are required' });
+  const queue = loadTrainingQueue();
+  queue.items = Array.isArray(queue.items) ? queue.items : [];
+  queue.items.unshift({
+    id: String(Date.now()),
+    user,
+    assistant,
+    correction,
+    status,
+    createdAt: new Date().toISOString(),
+    source: 'xori-studio',
+  });
+  saveTrainingQueue(queue);
+  res.json({ ok: true, item: queue.items[0], queue });
+});
+
+app.patch('/api/studio/training/:id', (req, res) => {
+  const queue = loadTrainingQueue();
+  const item = queue.items.find((x: any) => x.id === req.params.id);
+  if (!item) return res.status(404).json({ error: 'training item not found' });
+  if (typeof req.body?.correction === 'string') item.correction = req.body.correction.trim();
+  if (['pending','approved','ignored'].includes(req.body?.status)) item.status = req.body.status;
+  item.updatedAt = new Date().toISOString();
+  saveTrainingQueue(queue);
+  res.json({ ok: true, item, queue });
+});
+
+app.get('/api/studio/versions', (req, res) => {
+  res.json(loadJson<any>(MODEL_VERSIONS_PATH, {
+    production: 'cloudflare-hori-lora',
+    candidates: [],
+  }));
+});
+
 app.get('/api/providers', (req, res) => {
   res.json({
     offline: OFFLINE_MODE,
