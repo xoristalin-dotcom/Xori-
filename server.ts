@@ -62,6 +62,19 @@ let telegramPollingStarted = false;
 
 app.use(express.json({ limit: '10mb' }));
 
+// Allow the separate Xori AI Studio static site to use the control API.
+app.use((req, res, next) => {
+  const origin = req.headers.origin || '';
+  if (origin === 'https://xori-ai-studio.onrender.com') {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
 // Paths to JSON data files
 const BASE_DIR = process.cwd();
 const CONTROL_PATH = path.join(BASE_DIR, 'hori_control.json');
