@@ -12,10 +12,10 @@ if(!state.hfUrl)state.hfUrl='https://huggingface.co/spaces/Abobus2222228/xori-ho
 const logs=[];
 const sessions=new Map();
 function log(x){logs.unshift({time:new Date().toISOString(),message:x});logs.splice(200);}
-function panelToken(){return String(process.env.HORI_CONTROL_PANEL_TOKEN||process.env.HORI_CONTROL_TOKEN||'').trim()}
-function cookie(req){const m=(req.headers.cookie||'').match(/(?:^|; )hori_session=([^;]+)/);return m?decodeURIComponent(m[1]):''}
-function authorized(req){const token=panelToken();if(!token)return true;const sid=cookie(req);return !!(sid&&sessions.has(sid)&&sessions.get(sid)>Date.now())}
-function authGuard(req,res,u){if(!panelToken())return true;if(u.pathname==='/api/health'||u.pathname==='/api/login'||u.pathname==='/favicon.ico')return true;if(u.pathname==='/'&&!authorized(req))return true;if(authorized(req))return true;out(res,{ok:false,error:'Требуется вход в Hori Control'},401);return false}
+function panelToken(){return ''}
+function cookie(req){return ''}
+function authorized(req){return true}
+function authGuard(req,res,u){return true}
 async function withTimeout(p,ms=5000){return Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),ms))])}
 async function json(req){let s='';for await(const c of req)s+=c;return s?JSON.parse(s):{}}
 async function apiFetch(url,opt={}){return fetch(url,opt)}
