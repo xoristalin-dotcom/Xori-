@@ -475,24 +475,15 @@ function cleanHtmlToText(html: string): string {
     .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ');
 
   const plain = withoutScripts
-    .replace(/<br\s*\/?>/gi, '
-')
-    .replace(/<\/p>|<\/div>|<\/li>|<\/h[1-6]>|<\/tr>|<\/article>|<\/section>/gi, '
-')
+    .replace(/<br\s*\/?\s*>/gi, ' ')
+    .replace(/<\/p>|<\/div>|<\/li>|<\/h[1-6]>|<\/tr>|<\/article>|<\/section>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
     .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/\s+
-/g, '
-')
-    .replace(/
-{3,}/g, '
-
-');
+    .replace(/&gt;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
   return plain.replace(/\s+/g, ' ').trim();
 }
