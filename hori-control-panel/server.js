@@ -54,7 +54,7 @@ async function handler(req,res){
    withTimeout(fetch(state.botUrl+'/api/providers',{headers:process.env.BOT_CONTROL_TOKEN?{'x-hori-control-token':process.env.BOT_CONTROL_TOKEN}:{}})),
    withTimeout(fetch(state.hfUrl,{headers:process.env.HF_TOKEN?{Authorization:'Bearer '+process.env.HF_TOKEN}:{}})),
    withTimeout(fetch(state.renderUrl)),
-   withTimeout(fetch('https://api.github.com/repos/'+encodeURIComponent(state.githubRepo),{headers:{Accept:'application/vnd.github+json','User-Agent':'Hori-Control'}}))
+   withTimeout(fetch('https://api.github.com/repos/'+state.githubRepo,{headers:{Accept:'application/vnd.github+json','User-Agent':'Hori-Control'}}))
   ]);
   const read=async x=>{if(x.status!=='fulfilled')return {ok:false,error:x.reason?.message||'failed'};try{return {ok:x.value.ok,status:x.value.status,data:await x.value.json()}}catch{return {ok:x.value.ok,status:x.value.status}}};
   const [bot,autonomy,providers,hf,render,github]=await Promise.all(checks.map(read));
