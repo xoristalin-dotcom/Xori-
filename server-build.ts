@@ -2942,11 +2942,50 @@ app.patch('/api/studio/training/:id', (req, res) => {
   res.json({ ok: true, item, queue });
 });
 
+function ensureExistingXoriCandidate(versions: any): any {
+  versions.candidates = Array.isArray(versions.candidates) ? versions.candidates : [];
+  const id = 'candidate-20260926194920';
+  let candidate = versions.candidates.find((x: any) => x.id === id);
+  if (!candidate) {
+    candidate = {
+      id,
+      status: 'trained',
+      datasetSize: 10,
+      createdAt: '2026-09-26T19:49:20.000Z',
+      manifest: {
+        candidateId: id,
+        baseModel: 'meta-llama/Llama-3.2-3B-Instruct',
+        cloudflareRuntimeModel: '@cf/meta/llama-3.2-3b-instruct',
+        adapterFormat: 'PEFT LoRA',
+        datasetSize: 10,
+        format: 'chat-sft-jsonl',
+      },
+      runner: {
+        adapterId: '22e41036-8689-405c-b3e0-36b7bf0180cd',
+        finetuneName: 'xori-hori-candidate-20260926194920-final',
+        model: '@cf/meta/llama-3.2-3b-instruct',
+        datasetSize: 10,
+        trainLoss: 2.924344539642334,
+        source: 'colab',
+        adapterFormat: 'PEFT LoRA',
+        baseModel: 'meta-llama/Llama-3.2-3B-Instruct',
+      },
+      message: 'Восстановлена метаинформация существующего Cloudflare LoRA; новый Fine Tune не создавался.',
+    };
+    versions.candidates.unshift(candidate);
+    versions.candidates = versions.candidates.slice(0, 20);
+    saveJson(MODEL_VERSIONS_PATH, versions);
+  }
+  return candidate;
+}
+
 app.get('/api/studio/versions', (req, res) => {
-  res.json(loadJson<any>(MODEL_VERSIONS_PATH, {
+  const versions = loadJson<any>(MODEL_VERSIONS_PATH, {
     production: 'cloudflare-hori-lora',
     candidates: [],
-  }));
+  });
+  ensureExistingXoriCandidate(versions);
+  res.json(versions);
 });
 
 app.get('/api/providers', (req, res) => {
