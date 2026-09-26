@@ -1060,10 +1060,19 @@ async function generateTextWithConfiguredProvider(systemPrompt: string, userText
         },
       );
 
-      const data = await response.json() as any;
+      const responseText = await response.text();
+      let data: any = null;
+      try {
+        data = responseText ? JSON.parse(responseText) : null;
+      } catch {
+        lastError = `HTTP ${response.status}: invalid JSON: ${responseText.slice(0, 900)}`;
+        console.error(`[Cloudflare Xori] request failed attempt=${attempt}/3: ${lastError}`);
+        if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
+        continue;
+      }
 
       if (!response.ok || data?.success === false) {
-        lastError = `HTTP ${response.status}: ${JSON.stringify(data).slice(0, 900)}`;
+        lastError = `HTTP ${response.status}: ${JSON.stringify(data).slice(0, 1200)}`;
         console.error(`[Cloudflare Xori] request failed attempt=${attempt}/3: ${lastError}`);
         if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
         continue;
