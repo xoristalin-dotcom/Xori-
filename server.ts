@@ -2058,6 +2058,12 @@ function updateConversationState(memory: any, userText: string, reply: string, d
   state.last_user_text = userText.slice(0, 500);
   state.last_hori_text = reply.slice(0, 800);
   state.last_format = decision.format;
+  state.last_action = decision.action;
+  state.last_decision_reason = decision.reason;
+  state.last_decision_confidence = decision.confidence;
+  state.last_ask_question = decision.askQuestion;
+  state.last_send_image = decision.sendImage;
+  state.last_send_voice = decision.sendVoice;
   state.last_decision_at = new Date().toISOString();
   state.conversation_energy = Math.max(0, Math.min(100,
     state.conversation_energy + (decision.askQuestion ? 7 : -2) + (decision.action === 'ignore' ? -10 : 4)
@@ -2469,6 +2475,10 @@ app.get('/api/autonomy', (req, res) => {
     next_proactive_at: memory.next_proactive_at || null,
     last_proactive_message: memory.last_proactive_message || null,
     conversation_state: state,
+    last_decision: Array.isArray(memory.proactive_sent) && memory.proactive_sent.length
+      ? memory.proactive_sent[memory.proactive_sent.length - 1]
+      : null,
+    proactive_history: Array.isArray(memory.proactive_sent) ? memory.proactive_sent.slice(-10) : [],
     telegram_voice_configured: Boolean(TELEGRAM_VOICE_URL),
     pollinations_image_configured: Boolean(POLLINATIONS_API_KEY),
   });
