@@ -2682,6 +2682,11 @@ app.post('/api/studio/training/callback', (req, res) => {
   if (!candidateId || !status) return res.status(400).json({ error: 'candidateId and status are required' });
 
   const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
+  // Render's filesystem is ephemeral, so restore the already-trained Xori candidate
+  // before applying a callback after a fresh deploy. This does not create a new Fine Tune.
+  if (candidateId === 'candidate-20260926194920') {
+    ensureExistingXoriCandidate(versions);
+  }
   const candidate = (versions.candidates || []).find((x: any) => x.id === candidateId);
   if (!candidate) return res.status(404).json({ error: 'candidate not found' });
 
