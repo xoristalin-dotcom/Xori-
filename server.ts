@@ -1535,6 +1535,18 @@ async function handleTelegramMessage(chatId: number, text: string, history: any[
 
   memory.last_chat_id = chatId;
   memory.last_interaction = new Date().toISOString();
+
+  // Re-arm proactive messaging immediately after every real user message.
+  // This avoids waiting for the next scheduler tick and guarantees that
+  // "Пишет первой" starts a fresh 2-10 minute window from the latest interaction.
+  if (control.proactiveEnabled) {
+    const proactiveDelay = control.autoFirst
+      ? 2 * 60 * 1000 + Math.random() * (8 * 60 * 1000)
+      : 4 * 60 * 60 * 1000 + Math.random() * (8 * 60 * 60 * 1000);
+    memory.next_proactive_at = new Date(Date.now() + proactiveDelay).toISOString();
+    console.log('[Proactive] re-armed after user message; autoFirst=' + String(control.autoFirst));
+  }
+
   const updatedMemory = updateMemoryFromUserMessage(cleanText, memory);
   const reflectedMemory = await syncInnerMonologue(cleanText, updatedMemory, history);
   reflectedMemory.last_chat_id = chatId;
