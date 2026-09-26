@@ -2184,14 +2184,14 @@ async function maybeSendProactiveTelegramMessage() {
 
   try {
     const chatId = Number(memory.last_chat_id);
-    await sendTelegramReply(chatId, finalText);
-    console.log('[Proactive] sent text format=' + decision.format + ' reason=' + decision.reason);
-
     if (decision.sendVoice && control.voiceEnabled) {
-      // sendTelegramVoice has a free node-edge-tts fallback, so a configured
-      // TELEGRAM_VOICE_URL is not required for voice mode.
+      // Voice mode is voice-only: never send the same text as a duplicate message.
       await sendTelegramVoice(chatId, finalText).catch((err) => console.warn('Proactive voice failed:', err));
+    } else {
+      await sendTelegramReply(chatId, finalText);
     }
+    console.log('[Proactive] sent format=' + decision.format + ' reason=' + decision.reason);
+
     if (decision.sendImage && control.photoEnabled) {
       const visualReference = isHoriSelfPhotoRequest(finalText) ? await fetchHoriVisualReference() : '';
       const imagePrompt = buildImagePrompt(finalText, visualReference);
@@ -2371,43 +2371,22 @@ app.post('/api/xori', async (req, res) => {
   if (!message) return res.status(400).json({ error: 'message is required' });
 
   try {
-    // Primary path: the hosted Xori fine-tune in Cloudflare Workers AI.
     const systemPrompt = buildSystemPrompt();
-    const cloudflareReply = await generateTextWithConfiguredProvider(systemPrompt, message, history);
-    if (cloudflareReply) {
-      return res.json({
-        reply: cloudflareReply,
-        model: process.env.CLOUDFLARE_FINETUNE_ID || '@cf/meta/llama-3.2-3b-instruct',
+    const reply = await generateTextWithConfiguredProvider(systemPrompt, message, history);
+    if (!reply) {
+      return res.status(503).json({
+        error: 'Xori AI is unavailable',
         provider: 'cloudflare-xori',
       });
     }
-
-    // Legacy fallback: local ONNX model on Render.
-    const localResult = await generateXoriLocalReply(message, history);
-    if (localResult?.text) {
-      console.warn('[Xori API] Cloudflare unavailable; using legacy local fallback.');
-      return res.json({
-        reply: localResult.text,
-        model: localResult.model,
-        provider: 'xori-local-fallback',
-      });
-    }
-
-    return res.status(503).json({ error: 'Xori Cloudflare model and legacy local fallback are unavailable' });
+    saveTrainingExample(message, reply, false);
+    return res.json({
+      reply,
+      model: process.env.CLOUDFLARE_FINETUNE_ID || '@cf/meta/llama-3.2-3b-instruct',
+      provider: 'cloudflare-xori',
+    });
   } catch (error) {
     console.error('[Xori API] request failed:', error);
-    try {
-      const localResult = await generateXoriLocalReply(message, history);
-      if (localResult?.text) {
-        return res.json({
-          reply: localResult.text,
-          model: localResult.model,
-          provider: 'xori-local-fallback',
-        });
-      }
-    } catch (fallbackError) {
-      console.error('[Xori API] legacy fallback failed:', fallbackError);
-    }
     return res.status(502).json({
       error: 'Xori model failed',
       detail: error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
