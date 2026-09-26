@@ -2537,6 +2537,154 @@ app.get('/api/studio/overview', (req, res) => {
   });
 });
 
+function buildTrainingDataset() {
+  const queue = loadTrainingQueue();
+  const approved = queue.items.filter((x: any) => x.status === 'approved' && x.user && (x.correction || x.assistant));
+  const seen = new Set<string>();
+  const examples: any[] = [];
+  for (const item of approved) {
+    const answer = String(item.correction || item.assistant).trim();
+    const user = String(item.user).trim();
+    const key = (user + '\\n' + answer).toLowerCase().replace(/\\s+/g, ' ');
+    if (!user || !answer || seen.has(key)) continue;
+    seen.add(key);
+    examples.push({
+      messages: [
+        { role: 'system', content: 'Ты — Хори Кёко из Horimiya. Отвечай естественно на русском, не придумывай действия или мысли собеседника.' },
+        { role: 'user', content: user },
+        { role: 'assistant', content: answer },
+      ],
+      sourceId: item.id,
+    });
+  }
+  return examples;
+}
+
+function buildTrainingManifest(datasetSize: number, candidateId: string) {
+  return {
+    candidateId,
+    baseModel: '@cf/meta/llama-3.2-3b-instruct',
+    productionLoRA: process.env.CLOUDFLARE_FINETUNE_ID || null,
+    datasetSize,
+    format: 'chat-sft-jsonl',
+    createdAt: new Date().toISOString(),
+    lora: { r: 8, alpha: 16, dropout: 0.05, targetModules: ['q_proj', 'k_proj', 'v_proj', 'o_proj'] },
+    training: { epochs: 6, batchSize: 1, gradientAccumulation: 16, learningRate: 0.0001, warmupRatio: 0.05, weightDecay: 0.01, maxLength: 1024 },
+    safety: { neverOverwriteProduction: true, candidateOnly: true },
+  };
+}
+
+app.post('/api/studio/training/prepare', (req, res) => {
+  const examples = buildTrainingDataset();
+  if (examples.length < 10) {
+    return res.status(400).json({ ok: false, error: 'Нужно минимум 10 подтверждённых примеров', count: examples.length });
+  }
+  const candidateId = 'candidate-' + new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+  const datasetPath = path.join(BASE_DIR, 'xori-training-' + candidateId + '.jsonl');
+  const manifestPath = path.join(BASE_DIR, 'xori-training-' + candidateId + '.manifest.json');
+  fs.writeFileSync(datasetPath, examples.map((x) => JSON.stringify(x)).join('\n') + '\n', 'utf8');
+  const manifest = buildTrainingManifest(examples.length, candidateId);
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+
+  const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
+  versions.candidates = Array.isArray(versions.candidates) ? versions.candidates : [];
+  versions.candidates.unshift({
+    id: candidateId,
+    status: 'dataset_ready',
+    datasetSize: examples.length,
+    manifest,
+    createdAt: manifest.createdAt,
+  });
+  versions.candidates = versions.candidates.slice(0, 20);
+  saveJson(MODEL_VERSIONS_PATH, versions);
+  res.json({ ok: true, candidateId, datasetSize: examples.length, manifest, download: '/api/studio/training/dataset/' + candidateId });
+});
+
+app.get('/api/studio/training/dataset/:candidateId', (req, res) => {
+  const filePath = path.join(BASE_DIR, 'xori-training-' + req.params.candidateId + '.jsonl');
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'dataset not found' });
+  res.download(filePath, req.params.candidateId + '.jsonl');
+});
+
+app.post('/api/studio/training/run', async (req, res) => {
+  const candidateId = String(req.body?.candidateId || '');
+  if (!candidateId) return res.status(400).json({ error: 'candidateId is required' });
+  const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
+  const candidate = (versions.candidates || []).find((x: any) => x.id === candidateId);
+  if (!candidate) return res.status(404).json({ error: 'candidate not found' });
+
+  const runnerUrl = process.env.TRAINING_RUNNER_URL || '';
+  if (!runnerUrl) {
+    candidate.status = 'waiting_for_gpu';
+    candidate.message = 'GPU runner не настроен. Dataset и manifest готовы; Production не изменён.';
+    saveJson(MODEL_VERSIONS_PATH, versions);
+    return res.status(202).json({ ok: true, status: candidate.status, candidate });
+  }
+
+  try {
+    candidate.status = 'training';
+    candidate.startedAt = new Date().toISOString();
+    saveJson(MODEL_VERSIONS_PATH, versions);
+    const response = await fetch(runnerUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(process.env.TRAINING_RUNNER_TOKEN ? { Authorization: 'Bearer ' + process.env.TRAINING_RUNNER_TOKEN } : {}),
+      },
+      body: JSON.stringify({
+        candidateId,
+        manifest: candidate.manifest,
+        datasetUrl: new URL('/api/studio/training/dataset/' + candidateId, req.protocol + '://' + req.get('host')).toString(),
+      }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!response.ok) throw new Error('GPU runner HTTP ' + response.status);
+    const result = await response.json().catch(() => ({}));
+    candidate.runner = result;
+    candidate.status = result.status || 'training';
+    saveJson(MODEL_VERSIONS_PATH, versions);
+    res.json({ ok: true, candidate });
+  } catch (error) {
+    candidate.status = 'runner_error';
+    candidate.error = error instanceof Error ? error.message : String(error);
+    saveJson(MODEL_VERSIONS_PATH, versions);
+    res.status(502).json({ ok: false, error: candidate.error, candidate });
+  }
+});
+
+app.post('/api/studio/training/:candidateId/test', async (req, res) => {
+  const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
+  const candidate = (versions.candidates || []).find((x: any) => x.id === req.params.candidateId);
+  if (!candidate) return res.status(404).json({ error: 'candidate not found' });
+  const tests = [
+    'Привет, как у тебя сегодня дела?',
+    'Мне грустно и я не знаю, что делать.',
+    'Расскажи что-нибудь смешное.',
+    'Что ты думаешь о Миямуре?',
+    'Я сегодня много работал, устал.',
+  ];
+  candidate.tests = { count: tests.length, status: candidate.status === 'trained' ? 'ready' : 'waiting_for_candidate', checkedAt: new Date().toISOString(), cases: tests };
+  if (candidate.status === 'trained') candidate.status = 'tested';
+  saveJson(MODEL_VERSIONS_PATH, versions);
+  res.json({ ok: true, candidate });
+});
+
+app.post('/api/studio/versions/:candidateId/promote', (req, res) => {
+  const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
+  const candidate = (versions.candidates || []).find((x: any) => x.id === req.params.candidateId);
+  if (!candidate) return res.status(404).json({ error: 'candidate not found' });
+  if (candidate.status !== 'tested' || !candidate.runner?.adapterId) {
+    return res.status(409).json({ error: 'Candidate must be trained, tested and have adapterId before promotion', candidate });
+  }
+  const previous = versions.production;
+  versions.production = candidate.runner.adapterId;
+  candidate.status = 'production';
+  candidate.promotedAt = new Date().toISOString();
+  candidate.previousProduction = previous;
+  saveJson(MODEL_VERSIONS_PATH, versions);
+  res.json({ ok: true, production: versions.production, candidate });
+});
+
 app.get('/api/studio/training', (req, res) => {
   res.json(loadTrainingQueue());
 });
