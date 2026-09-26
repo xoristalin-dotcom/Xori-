@@ -2786,6 +2786,8 @@ app.post('/api/studio/training/:candidateId/test', async (req, res) => {
 });
 
 app.post('/api/studio/versions/:candidateId/test', async (req, res) => {
+  const bootstrapVersions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
+  if (req.params.candidateId === 'candidate-20260926194920') ensureExistingXoriCandidate(bootstrapVersions);
   const expected = process.env.TRAINING_RUNNER_TOKEN || '';
   if (expected) {
     const auth = String(req.headers.authorization || '');
