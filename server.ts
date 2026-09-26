@@ -651,9 +651,7 @@ async function fetchOpenWebSources(text: string): Promise<string> {
 Фрагмент поиска: ${result.snippet}`;
     });
 
-    return sources.join('
-
-').slice(0, 3000);
+    return sources.join(' ').slice(0, 3000);
   } catch (err) {
     markWebSourceFailure('duckduckgo-html', err);
     console.warn('Open web search failed:', err);
