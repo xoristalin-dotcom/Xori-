@@ -1058,32 +1058,42 @@ async function generateTextWithConfiguredProvider(systemPrompt: string, userText
       },
     );
 
-    const data = await response.json() as any;
+    let lastError = '';
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        const data = await response.json() as any;
 
-    if (!response.ok || data?.success === false) {
-      console.error(
-        '[Cloudflare Xori] request failed:',
-        response.status,
-        JSON.stringify(data).slice(0, 1200),
-      );
-      return '';
+        if (!response.ok || data?.success === false) {
+          lastError = `HTTP ${response.status}: ${JSON.stringify(data).slice(0, 900)}`;
+          console.error(`[Cloudflare Xori] request failed attempt=${attempt}/3: ${lastError}`);
+          if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
+          continue;
+        }
+
+        const content =
+          data?.result?.choices?.[0]?.message?.content ||
+          data?.result?.response ||
+          '';
+
+        if (typeof content !== 'string' || !content.trim()) {
+          lastError = 'empty model response';
+          console.error(`[Cloudflare Xori] Empty model response attempt=${attempt}/3`);
+          if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
+          continue;
+        }
+
+        console.log(
+          `[Cloudflare Xori] success fine-tune=${fineTuneId} attempt=${attempt} model=${data?.result?.model || '@cf/meta/llama-3.2-3b-instruct'}`,
+        );
+        return content.trim();
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+        console.error(`[Cloudflare Xori] response parse error attempt=${attempt}/3: ${lastError}`);
+        if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
+      }
     }
-
-    const content =
-      data?.result?.choices?.[0]?.message?.content ||
-      data?.result?.response ||
-      '';
-
-    if (typeof content !== 'string' || !content.trim()) {
-      console.error('[Cloudflare Xori] Empty model response:', JSON.stringify(data).slice(0, 1000));
-      return '';
-    }
-
-    console.log(
-      `[Cloudflare Xori] success fine-tune=${fineTuneId} model=${data?.result?.model || '@cf/meta/llama-3.2-3b-instruct'}`,
-    );
-
-    return content.trim();
+    console.error('[Cloudflare Xori] all retry attempts failed:', lastError);
+    return '';
   } catch (error) {
     console.error('[Cloudflare Xori] inference error:', error);
     return '';
