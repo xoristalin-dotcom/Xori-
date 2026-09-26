@@ -2658,9 +2658,63 @@ app.post('/api/studio/training/prepare', (req, res) => {
 });
 
 app.get('/api/studio/training/dataset/:candidateId', (req, res) => {
+  const expected = process.env.TRAINING_RUNNER_TOKEN || '';
+  if (expected) {
+    const auth = String(req.headers.authorization || '');
+    const supplied = auth.startsWith('Bearer ') ? auth.slice(7) : String(req.headers['x-training-runner-token'] || '');
+    if (supplied !== expected) return res.status(401).json({ error: 'runner unauthorized' });
+  }
   const filePath = path.join(BASE_DIR, 'xori-training-' + req.params.candidateId + '.jsonl');
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'dataset not found' });
   res.download(filePath, req.params.candidateId + '.jsonl');
+});
+
+app.post('/api/studio/training/callback', (req, res) => {
+  const expected = process.env.TRAINING_RUNNER_TOKEN || '';
+  if (expected) {
+    const auth = String(req.headers.authorization || '');
+    const supplied = auth.startsWith('Bearer ') ? auth.slice(7) : String(req.headers['x-training-runner-token'] || '');
+    if (supplied !== expected) return res.status(401).json({ error: 'runner unauthorized' });
+  }
+
+  const candidateId = String(req.body?.candidateId || '');
+  const status = String(req.body?.status || '');
+  if (!candidateId || !status) return res.status(400).json({ error: 'candidateId and status are required' });
+
+  const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
+  const candidate = (versions.candidates || []).find((x: any) => x.id === candidateId);
+  if (!candidate) return res.status(404).json({ error: 'candidate not found' });
+
+  candidate.status = status;
+  candidate.updatedAt = new Date().toISOString();
+  if (req.body?.runner) candidate.runner = { ...(candidate.runner || {}), ...req.body.runner };
+  if (req.body?.error) candidate.error = String(req.body.error).slice(0, 2000);
+  if (req.body?.message) candidate.message = String(req.body.message).slice(0, 2000);
+  saveJson(MODEL_VERSIONS_PATH, versions);
+  res.json({ ok: true, candidate });
+});
+
+app.get('/api/studio/training/claim', (req, res) => {
+  const expected = process.env.TRAINING_RUNNER_TOKEN || '';
+  const auth = String(req.headers.authorization || '');
+  if (expected && auth !== 'Bearer ' + expected) return res.status(401).json({ error: 'runner unauthorized' });
+
+  const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
+  const candidate = (versions.candidates || []).find((x: any) => x.status === 'queued');
+  if (!candidate) return res.status(204).end();
+
+  candidate.status = 'training';
+  candidate.startedAt = new Date().toISOString();
+  candidate.message = 'GPU runner забрал задачу.';
+  saveJson(MODEL_VERSIONS_PATH, versions);
+
+  const base = req.protocol + '://' + req.get('host');
+  res.json({
+    candidateId: candidate.id,
+    manifest: candidate.manifest,
+    datasetUrl: new URL('/api/studio/training/dataset/' + candidate.id, base).toString(),
+    callbackUrl: new URL('/api/studio/training/callback', base).toString()
+  });
 });
 
 app.post('/api/studio/training/run', async (req, res) => {
@@ -2672,8 +2726,9 @@ app.post('/api/studio/training/run', async (req, res) => {
 
   const runnerUrl = process.env.TRAINING_RUNNER_URL || '';
   if (!runnerUrl) {
-    candidate.status = 'waiting_for_gpu';
-    candidate.message = 'GPU runner не настроен. Dataset и manifest готовы; Production не изменён.';
+    candidate.status = 'queued';
+    candidate.queuedAt = new Date().toISOString();
+    candidate.message = 'Задача поставлена в GPU-очередь. Colab/GPU runner заберёт её автоматически.';
     saveJson(MODEL_VERSIONS_PATH, versions);
     return res.status(202).json({ ok: true, status: candidate.status, candidate });
   }
@@ -2692,6 +2747,7 @@ app.post('/api/studio/training/run', async (req, res) => {
         candidateId,
         manifest: candidate.manifest,
         datasetUrl: new URL('/api/studio/training/dataset/' + candidateId, req.protocol + '://' + req.get('host')).toString(),
+        callbackUrl: new URL('/api/studio/training/callback', req.protocol + '://' + req.get('host')).toString(),
       }),
       signal: AbortSignal.timeout(30000),
     });
