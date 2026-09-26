@@ -1949,10 +1949,16 @@ function decideHoriAction(text: string, reply: string, memory: any, options: { p
   const recentPhoto = state.last_format === 'photo' || state.last_format === 'text+photo';
 
   if (options.proactive) {
-    const quietHours = (() => {
-      const hour = new Date().getHours();
-      return hour >= 1 || hour < 8;
-    })();
+    // Render commonly runs in UTC. Use the user's configured timezone for
+    // quiet hours so the scheduler is not accidentally silent all day.
+    const timezone = process.env.HORI_TIMEZONE || 'Europe/Saratov';
+    const hour = Number(new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hour: '2-digit',
+      hourCycle: 'h23',
+    }).format(new Date()));
+    const quietHours = hour >= 1 && hour < 8;
+    console.log('[Proactive] decision window hour=' + String(hour) + ' timezone=' + timezone + ' quiet=' + String(quietHours));
     if (quietHours) {
       return { action: 'ignore', format: 'text', askQuestion: false, continueTopic: false, sendImage: false, sendVoice: false, reason: 'quiet-hours', confidence: 0.96 };
     }
