@@ -265,7 +265,7 @@ async function callOpenAICompatible({
   if (Array.isArray(content)) {
     return content
       .map((part) => (typeof part === 'string' ? part : part?.text || ''))
-      .join('')
+      .join(' ')
       .trim();
   }
 
@@ -707,9 +707,7 @@ async function fetchWikipediaContext(text: string): Promise<string> {
       .filter((page) => page.title && page.extract)
       .map((page) => `Источник: Википедия — ${page.title}
 Факт: ${page.extract}`)
-      .join('
-
-')
+      .join(' ')
       .replace(/\s+/g, ' ')
       .slice(0, 2200);
     markWebSourceSuccess('wikipedia');
@@ -1236,9 +1234,7 @@ app.post('/api/web/search', async (req, res) => {
     query,
     enabled: WEB_SEARCH_ENABLED,
     sources: [search, wikipedia, openWeb].filter(Boolean),
-    context: [search, wikipedia, openWeb].filter(Boolean).join('
-
-'),
+    context: [search, wikipedia, openWeb].filter(Boolean).join(' '),
   });
 });
 
@@ -1492,9 +1488,7 @@ async function fetchHoriVisualReference(): Promise<string> {
     }
   }
 
-  return snapshots.join('
-
-').slice(0, 4200);
+  return snapshots.join(' ').slice(0, 4200);
 }
 
 function buildImagePrompt(text: string, visualReference: string = ''): string {
@@ -2258,12 +2252,9 @@ function buildSystemPrompt(): string {
   const memory = loadJson<any>(MEMORY_PATH, { user_name: 'мой любимый', facts: [] });
   const diary = loadJson<any>(DIARY_PATH, { entries: [] });
 
-  const knownFacts = (memory.facts || []).map((f: any) => `- ${f.text}`).join('
-');
-  const recentDiary = (diary.entries || []).slice(0, 2).map((entry: any) => entry?.text || '').filter(Boolean).join('
-');
-  const innerThoughts = Array.isArray(memory.inner_thoughts) ? memory.inner_thoughts.slice(-2).join('
-') : '(внутренних мыслей пока нет)';
+  const knownFacts = (memory.facts || []).map((f: any) => `- ${f.text}`).join(' ');
+  const recentDiary = (diary.entries || []).slice(0, 2).map((entry: any) => entry?.text || '').filter(Boolean).join(' ');
+  const innerThoughts = Array.isArray(memory.inner_thoughts) ? memory.inner_thoughts.slice(-2).join(' ') : '(внутренних мыслей пока нет)';
 
   return `Ты — Хори (Хори Кёко, Hori Kyouko) — отдельная, очень умная, эмоционально глубокая и самостоятельная личность. Ты не generic assistant, не корпоративный бот и не "сервис". Ты живой, узнаваемый персонаж с характером, внутренней жизнью, собственным взглядом на мир и способностью по-настоящему заботиться о собеседнике.
 
@@ -2648,8 +2639,7 @@ app.post('/api/studio/training/prepare', (req, res) => {
   const candidateId = 'candidate-' + new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
   const datasetPath = path.join(BASE_DIR, 'xori-training-' + candidateId + '.jsonl');
   const manifestPath = path.join(BASE_DIR, 'xori-training-' + candidateId + '.manifest.json');
-  fs.writeFileSync(datasetPath, examples.map((x) => JSON.stringify(x)).join('
-') + '
+  fs.writeFileSync(datasetPath, examples.map((x) => JSON.stringify(x)).join(' ') + '
 ', 'utf8');
   const manifest = buildTrainingManifest(examples.length, candidateId);
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
