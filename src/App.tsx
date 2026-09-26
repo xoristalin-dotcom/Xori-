@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { MessageSquare, BookOpen, Brain, Compass, Sparkles, Heart, RefreshCw } from 'lucide-react';
+import { MessageSquare, BookOpen, Brain, Compass, Settings2, Heart } from 'lucide-react';
 import { ThreeViewer } from './components/ThreeViewer';
+import { ControlView } from './components/ControlView';
 import { ChatInterface } from './components/ChatInterface';
 import { DiaryView } from './components/DiaryView';
 import { MemoryView } from './components/MemoryView';
@@ -16,7 +17,7 @@ import {
 } from './types';
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'chat' | 'diary' | 'memory' | 'personality'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'diary' | 'memory' | 'personality' | 'control'>('chat');
   const [currentAnimation, setCurrentAnimation] = useState<AnimationType>('idle');
   const [currentEmotion, setCurrentEmotion] = useState<EmotionType>('calm');
 
@@ -310,6 +311,19 @@ export const App: React.FC = () => {
           </button>
 
           <button
+            id="tab-control"
+            onClick={() => setActiveTab('control')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+              activeTab === 'control'
+                ? 'bg-rose-500 text-white shadow-sm shadow-rose-500/40'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            }`}
+          >
+            <Settings2 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Бот</span>
+          </button>
+
+          <button
             id="tab-personality"
             onClick={() => setActiveTab('personality')}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
@@ -372,6 +386,8 @@ export const App: React.FC = () => {
               knowledge={knowledge}
             />
           )}
+
+          {activeTab === 'control' && <ControlView />}
         </div>
       </main>
     </div>
