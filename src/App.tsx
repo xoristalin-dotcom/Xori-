@@ -16,6 +16,8 @@ import {
   KnowledgeData,
 } from './types';
 
+const API_BASE = 'https://xori-training-api.onrender.com';
+
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'chat' | 'diary' | 'memory' | 'personality' | 'control'>('chat');
   const [currentAnimation, setCurrentAnimation] = useState<AnimationType>('idle');
@@ -43,10 +45,10 @@ export const App: React.FC = () => {
     const fetchData = async () => {
       try {
         const [memRes, diaryRes, personRes, knowRes] = await Promise.all([
-          fetch('/api/memory').then((r) => r.json()),
-          fetch('/api/diary').then((r) => r.json()),
-          fetch('/api/personality').then((r) => r.json()),
-          fetch('/api/knowledge').then((r) => r.json()),
+          fetch(`${API_BASE}/api/memory`).then((r) => r.json()),
+          fetch(`${API_BASE}/api/diary`).then((r) => r.json()),
+          fetch(`${API_BASE}/api/personality`).then((r) => r.json()),
+          fetch(`${API_BASE}/api/knowledge`).then((r) => r.json()),
         ]);
 
         if (memRes) {
@@ -93,7 +95,7 @@ export const App: React.FC = () => {
     setIsGenerating(true);
 
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -156,7 +158,7 @@ export const App: React.FC = () => {
   const handleGenerateDiaryThought = async () => {
     setIsGenerating(true);
     try {
-      const res = await fetch('/api/diary/generate', {
+      const res = await fetch(`${API_BASE}/api/diary/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: messages.slice(-10) }),
@@ -177,7 +179,7 @@ export const App: React.FC = () => {
   // Add custom diary entry
   const handleAddDiaryEntry = async (entry: Omit<DiaryEntry, 'id'>) => {
     try {
-      const res = await fetch('/api/diary', {
+      const res = await fetch(`${API_BASE}/api/diary`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(entry),
@@ -194,7 +196,7 @@ export const App: React.FC = () => {
   // Add fact to memory
   const handleAddFact = async (factText: string) => {
     try {
-      const res = await fetch('/api/memory/facts', {
+      const res = await fetch(`${API_BASE}/api/memory/facts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fact: factText }),
@@ -211,7 +213,7 @@ export const App: React.FC = () => {
   // Remove fact from memory
   const handleRemoveFact = async (index: number) => {
     try {
-      const res = await fetch(`/api/memory/facts/${index}`, {
+      const res = await fetch(`${API_BASE}/api/memory/facts/${index}`, {
         method: 'DELETE',
       });
       const data = await res.json();
@@ -226,7 +228,7 @@ export const App: React.FC = () => {
   // Update user name in memory
   const handleUpdateUserName = async (name: string) => {
     try {
-      const res = await fetch('/api/memory/user_name', {
+      const res = await fetch(`${API_BASE}/api/memory/user_name`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_name: name }),
