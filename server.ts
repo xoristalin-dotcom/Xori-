@@ -2030,6 +2030,20 @@ async function maybeSendProactiveTelegramMessage() {
   const lastInteraction = memory.last_interaction ? new Date(memory.last_interaction).getTime() : now;
   const lastProactive = memory.last_proactive_message ? new Date(memory.last_proactive_message).getTime() : 0;
 
+  // Diagnostic state: log only meaningful scheduler decisions, not every 60s tick.
+  const diagnostic = {
+    enabled: Boolean(control.enabled),
+    proactiveEnabled: Boolean(control.proactiveEnabled),
+    autoFirst: Boolean(control.autoFirst),
+    hasChatId: Boolean(memory.last_chat_id),
+    nextProactiveAt: memory.next_proactive_at || null,
+    lastInteraction: memory.last_interaction || null,
+    lastProactiveMessage: memory.last_proactive_message || null,
+  };
+  if (!memory.last_chat_id || !memory.next_proactive_at) {
+    console.log('[Proactive] scheduler state ' + JSON.stringify(diagnostic));
+  }
+
   // Hard safety/anti-spam guard: no proactive message more often than every 6 hours.
   if (lastProactive && now - lastProactive < 6 * 60 * 60 * 1000) return;
   if (!memory.last_chat_id) return;
