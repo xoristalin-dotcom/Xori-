@@ -1,0 +1,15 @@
+name: Keep Hori awake
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-slim
+    steps:
+      - name: Wake Telegram service
+        run: |
+          curl --fail --silent --show-error --max-time 30 \
+            https://telegramxor.onrender.com/api/health
