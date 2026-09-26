@@ -2717,8 +2717,11 @@ app.post(', requireStudioAdmin/api/studio/training/:candidateId/test', async (re
     'Что ты думаешь о Миямуре?',
     'Я сегодня много работал, устал.',
   ];
-  candidate.tests = { count: tests.length, status: candidate.status === 'trained' ? 'ready' : 'waiting_for_candidate', checkedAt: new Date().toISOString(), cases: tests };
-  if (candidate.status === 'trained') candidate.status = 'tested';
+  candidate.tests = { count: tests.length, status: candidate.status === 'trained' && candidate.runner?.adapterId ? 'ready_for_runner' : 'waiting_for_candidate', checkedAt: new Date().toISOString(), cases: tests };
+  if (candidate.status === 'trained' && !candidate.runner?.adapterId) {
+    candidate.status = 'waiting_for_test_runner';
+    candidate.message = 'Candidate обучен, но реального test-runner ещё нет. Promotion заблокирован.';
+  }
   saveJson(MODEL_VERSIONS_PATH, versions);
   res.json({ ok: true, candidate });
 });
