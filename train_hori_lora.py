@@ -14,9 +14,9 @@ from transformers import (
     TrainingArguments,
 )
 
-BASE_MODEL = os.getenv("BASE_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
+BASE_MODEL = os.getenv("BASE_MODEL", "meta-llama/Llama-3.2-3B-Instruct")
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "xoritg_adapter"))
-REPO_ID = os.getenv("HF_REPO_ID", "Abobus2222228/Xoritg")
+REPO_ID = os.getenv("HF_REPO_ID", "")
 MAX_SEQ_LENGTH = int(os.getenv("MAX_SEQ_LENGTH", "1024"))
 
 ROOT = Path(__file__).resolve().parent
@@ -87,13 +87,20 @@ def load_pairs():
 
 def format_chat(user, assistant):
     return (
-        "<|im_start|>system\\n"
+        "<|im_start|>system\
+"
         "Ты — Хори Кёко из Horimiya. Отвечай только по-русски, естественно и по-человечески. "
         "Не копируй реплики из произведения. Не выдумывай факты о собеседнике. "
-        "Обычно 2–5 предложений. Не задавай больше одного вопроса.\\n"
-        "<|im_end|>\\n"
-        f"<|im_start|>user\\n{user}\\n<|im_end|>\\n"
-        f"<|im_start|>assistant\\n{assistant}<|im_end|>"
+        "Обычно 2–5 предложений. Не задавай больше одного вопроса.\
+"
+        "<|im_end|>\
+"
+        f"<|im_start|>user\
+{user}\
+<|im_end|>\
+"
+        f"<|im_start|>assistant\
+{assistant}<|im_end|>"
     )
 
 def main():
@@ -139,8 +146,8 @@ def main():
     )
 
     lora = LoraConfig(
-        r=16,
-        lora_alpha=32,
+        r=8,
+        lora_alpha=16,
         lora_dropout=0.05,
         bias="none",
         task_type="CAUSAL_LM",
@@ -149,10 +156,12 @@ def main():
 
     args = TrainingArguments(
         output_dir=str(OUTPUT_DIR),
-        num_train_epochs=3,
-        per_device_train_batch_size=2,
-        gradient_accumulation_steps=8,
-        learning_rate=2e-4,
+        num_train_epochs=4,
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=16,
+        learning_rate=1e-4,
+        warmup_ratio=0.05,
+        weight_decay=0.01,
         logging_steps=5,
         save_strategy="epoch",
         report_to="none",
@@ -179,15 +188,22 @@ def main():
     trainer.save_model(str(OUTPUT_DIR))
     tokenizer.save_pretrained(str(OUTPUT_DIR))
 
-    if token:
+    cfg_path = OUTPUT_DIR / "adapter_config.json"
+    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    cfg["model_type"] = "llama"
+    cfg_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    adapter_path = OUTPUT_DIR / "adapter_model.safetensors"
+    assert adapter_path.exists(), "adapter_model.safetensors missing"
+    assert cfg.get("model_type") == "llama"
+    assert int(cfg.get("r", 99)) <= 8
+    print(f"Cloudflare adapter ready: {adapter_path}")
+
+    if token and REPO_ID:
         trainer.model.push_to_hub(REPO_ID)
         tokenizer.push_to_hub(REPO_ID)
 
     print(f"saved adapter to {OUTPUT_DIR}")
-    print(f"HF repo: {REPO_ID}")
-
-if __name__ == "__main__":
-    main()
+    print("Cloudflare files: adapter_config.json + adapter_model.safetensors")
 
 if __name__ == "__main__":
     main()
