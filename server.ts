@@ -2645,6 +2645,17 @@ app.post('/telegram/webhook', async (req, res) => {
   }
 });
 
+// Start the autonomy scheduler as soon as the server is initialized.
+function startAutonomyScheduler() {
+  const runAutonomyTick = () => {
+    console.log('[Autonomy] tick');
+    void maybeGenerateNightlyDiary().catch((err) => console.warn('Nightly diary task failed:', err));
+    void maybeSendProactiveTelegramMessage().catch((err) => console.warn('Proactive Telegram task failed:', err));
+  };
+  runAutonomyTick();
+  setInterval(runAutonomyTick, 60 * 1000);
+}
+
 const distPath = path.join(BASE_DIR, 'dist');
 app.use(express.static(distPath));
 app.get('*', (req, res) => {
@@ -2658,10 +2669,7 @@ app.listen(PORT, '0.0.0.0', () => {
     void startTelegramPolling().catch((err) => {
       console.error('Telegram polling startup failed:', err);
     });
-    setInterval(() => {
-      void maybeGenerateNightlyDiary().catch((err) => console.warn('Nightly diary task failed:', err));
-      void maybeSendProactiveTelegramMessage().catch((err) => console.warn('Proactive Telegram task failed:', err));
-    }, 60 * 1000);
+    startAutonomyScheduler();
   } else {
     console.warn('Telegram polling not started: BOT_TOKEN is missing.');
   }
