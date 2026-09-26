@@ -59,6 +59,7 @@ const providerLastSuccess = new Map<string, string>();
 const webSourceCooldowns = new Map<string, number>();
 let cloudflareQuotaCooldownUntil = 0;
 let telegramPollingStarted = false;
+let activeFineTuneId = process.env.CLOUDFLARE_FINETUNE_ID || '';
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -1052,7 +1053,7 @@ async function generateTextWithConfiguredProvider(systemPrompt: string, userText
   // Render остаётся лёгким bridge и не загружает модель в свою RAM.
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || '';
   const apiToken = process.env.CLOUDFLARE_API_TOKEN || '';
-  const fineTuneId = process.env.CLOUDFLARE_FINETUNE_ID || '';
+  const fineTuneId = activeFineTuneId;
 
   if (!accountId || !apiToken || !fineTuneId) {
     console.error('[Cloudflare Xori] Missing CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN or CLOUDFLARE_FINETUNE_ID.');
@@ -2678,6 +2679,7 @@ app.post('/api/studio/versions/:candidateId/promote', (req, res) => {
   }
   const previous = versions.production;
   versions.production = candidate.runner.adapterId;
+  activeFineTuneId = String(candidate.runner.adapterId);
   candidate.status = 'production';
   candidate.promotedAt = new Date().toISOString();
   candidate.previousProduction = previous;
