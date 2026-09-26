@@ -71,15 +71,13 @@ function loadPersistedProductionLoRA() {
 
 app.use(express.json({ limit: '10mb' }));
 
-// Allow the separate Xori AI Studio static site to use the control API.
+// CORS for the public Xori AI Studio frontend.
 app.use((req, res, next) => {
-  const origin = req.headers.origin || '';
-  if (origin === 'https://xori-ai-studio.onrender.com') {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  }
+  // Studio uses fetch() without credentials, so wildcard CORS is safe here and
+  // avoids failures caused by Render/custom-domain origin changes.
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Hori-Control-Token');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
