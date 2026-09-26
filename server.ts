@@ -3058,3 +3058,4 @@ app.listen(PORT, '0.0.0.0', () => {
   } else {
     console.warn('Telegram polling not started: BOT_TOKEN is missing.');
   }
+});
