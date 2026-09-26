@@ -51,6 +51,7 @@ const HF_XORI_TOKEN = process.env.HF_XORI_TOKEN || process.env.HF_TOKEN || '';
 const INTERNAL_LEARNING_ENABLED = process.env.INTERNAL_LEARNING_ENABLED !== 'false';
 const WEB_SEARCH_ENABLED = process.env.WEB_SEARCH_ENABLED !== 'false';
 const CONTROL_TOKEN = process.env.HORI_CONTROL_TOKEN || '';
+const PROACTIVE_CHAT_ID = Number(process.env.HORI_PROACTIVE_CHAT_ID || 0);
 let internalReplyCounter = 0;
 const providerCooldowns = new Map<string, number>();
 const providerLastErrors = new Map<string, string>();
@@ -1721,7 +1722,11 @@ function ensureMemoryState(memory: any) {
   next.energy = typeof next.energy === 'number' ? next.energy : 72;
   next.last_interaction = next.last_interaction || now;
   next.last_proactive_message = next.last_proactive_message || null;
-  next.last_chat_id = next.last_chat_id ?? null;
+  next.last_chat_id = next.last_chat_id ?? (PROACTIVE_CHAT_ID || null);
+  if (PROACTIVE_CHAT_ID && !next.next_proactive_at) {
+    const delay = 2 * 60 * 1000 + Math.random() * (8 * 60 * 1000);
+    next.next_proactive_at = new Date(Date.now() + delay).toISOString();
+  }
   next.last_diary_update = next.last_diary_update || null;
   next.last_night_journal = next.last_night_journal || null;
   return next;
@@ -2053,7 +2058,10 @@ async function maybeSendProactiveTelegramMessage() {
 
   // Hard safety/anti-spam guard: no proactive message more often than every 6 hours.
   if (lastProactive && now - lastProactive < 6 * 60 * 60 * 1000) return;
-  if (!memory.last_chat_id) return;
+  if (!memory.last_chat_id) {
+    console.log('[Proactive] blocked: no chat id');
+    return;
+  }
 
   const scheduledAt = memory.next_proactive_at ? new Date(memory.next_proactive_at).getTime() : 0;
   // If "Пишет первой" is enabled, never keep an old 4-12h schedule after
@@ -2094,6 +2102,7 @@ async function maybeSendProactiveTelegramMessage() {
   try {
     const chatId = Number(memory.last_chat_id);
     await sendTelegramReply(chatId, finalText);
+    console.log('[Proactive] sent text chat_id=' + String(chatId) + ' format=' + decision.format + ' reason=' + decision.reason);
 
     if (decision.sendVoice && control.voiceEnabled) {
       // sendTelegramVoice has a free node-edge-tts fallback, so a configured
