@@ -2639,8 +2639,7 @@ app.post('/api/studio/training/prepare', (req, res) => {
   const candidateId = 'candidate-' + new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
   const datasetPath = path.join(BASE_DIR, 'xori-training-' + candidateId + '.jsonl');
   const manifestPath = path.join(BASE_DIR, 'xori-training-' + candidateId + '.manifest.json');
-    fs.writeFileSync(datasetPath, examples.map((x) => JSON.stringify(x)).join('\n') + '\n', 'utf8');
-', 'utf8');
+  fs.writeFileSync(datasetPath, examples.map((x) => JSON.stringify(x)).join('\n') + '\n', 'utf8');
   const manifest = buildTrainingManifest(examples.length, candidateId);
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
 
