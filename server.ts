@@ -1970,7 +1970,9 @@ function decideHoriAction(text: string, reply: string, memory: any, options: { p
     if (quietHours) {
       return { action: 'ignore', format: 'text', askQuestion: false, continueTopic: false, sendImage: false, sendVoice: false, reason: 'quiet-hours', confidence: 0.96 };
     }
-    if (Math.random() < 0.38) {
+    // When "Пишет первой" is enabled, the scheduled proactive message must actually be sent.
+    // Natural skipping remains available for the normal proactive mode.
+    if (!getControlState().autoFirst && Math.random() < 0.38) {
       return { action: 'ignore', format: 'text', askQuestion: false, continueTopic: false, sendImage: false, sendVoice: false, reason: 'no-natural-reason-to-interrupt', confidence: 0.62 };
     }
   }
@@ -2093,6 +2095,7 @@ async function maybeSendProactiveTelegramMessage() {
 
   const finalText = proactiveText || buildProactiveMessage(memory);
   const decision = decideHoriAction('', finalText, memory, { proactive: true });
+  console.log('[Proactive] decision action=' + decision.action + ' format=' + decision.format + ' reason=' + decision.reason);
 
   // The agent is allowed to decide that there is no natural reason to interrupt.
   if (decision.action === 'ignore') {
