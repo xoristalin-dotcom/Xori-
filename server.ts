@@ -57,6 +57,7 @@ const providerCooldowns = new Map<string, number>();
 const providerLastErrors = new Map<string, string>();
 const providerLastSuccess = new Map<string, string>();
 const webSourceCooldowns = new Map<string, number>();
+let cloudflareQuotaCooldownUntil = 0;
 let telegramPollingStarted = false;
 
 app.use(express.json({ limit: '10mb' }));
@@ -1029,6 +1030,11 @@ async function generateHuggingFaceHoriReply(
 }
 
 async function generateTextWithConfiguredProvider(systemPrompt: string, userText: string, history: any[] = []) {
+  if (cloudflareQuotaCooldownUntil > Date.now()) {
+    console.warn('[Cloudflare Xori] daily quota cooldown active; skipping request until quota reset.');
+    return '';
+  }
+  if (cloudflareQuotaCooldownUntil) cloudflareQuotaCooldownUntil = 0;
   // Основная модель Хори работает удалённо в Cloudflare Workers AI.
   // Render остаётся лёгким bridge и не загружает модель в свою RAM.
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || '';
@@ -1082,7 +1088,10 @@ async function generateTextWithConfiguredProvider(systemPrompt: string, userText
         // Cloudflare daily allocation is an account-level hard limit.
         // Retrying a quota-exhaustion 429 cannot restore the quota.
         if (response.status === 429 && /daily free allocation|account limited|used up.*allocation|quota/i.test(lastError)) {
-          console.error('[Cloudflare Xori] daily allocation exhausted; skipping retries.');
+          const nextUtcMidnight = new Date();
+          nextUtcMidnight.setUTCHours(24, 0, 0, 0);
+          cloudflareQuotaCooldownUntil = nextUtcMidnight.getTime();
+          console.error(`[Cloudflare Xori] daily allocation exhausted; skipping retries until ${nextUtcMidnight.toISOString()}.`);
           return '';
         }
 
