@@ -92,6 +92,10 @@ function getControlState() {
     photoEnabled: true,
     autoFirst: true,
     modelMode: 'auto',
+    replyDelayMode: 'instant',
+    replyDelayHours: 0,
+    replyDelayMinHours: 0,
+    replyDelayMaxHours: 6,
     updatedAt: null,
   });
 }
@@ -1626,7 +1630,30 @@ async function processTelegramUpdate(update: TelegramUpdate, histories: Map<numb
   const history = histories.get(chatId) || (savedMemory.last_chat_id === chatId ? savedHistory : []);
   await telegramRequest('sendChatAction', { chat_id: chatId, action: 'typing' });
   const reply = await handleTelegramMessage(chatId, text, history.slice(-8));
-  if (reply) await sendTelegramReply(chatId, reply);
+  if (reply) {
+    const control = getControlState();
+    const mode = control.replyDelayMode === 'random' ? 'random' : control.replyDelayMode === 'fixed' ? 'fixed' : 'instant';
+    const fixedHours = Math.max(0, Math.min(6, Number(control.replyDelayHours) || 0));
+    const minHours = Math.max(0, Math.min(6, Number(control.replyDelayMinHours) || 0));
+    const maxHours = Math.max(minHours, Math.min(6, Number(control.replyDelayMaxHours) || 6));
+    const delayHours = mode === 'random'
+      ? minHours + Math.random() * (maxHours - minHours)
+      : mode === 'fixed'
+        ? fixedHours
+        : 0;
+    const delayMs = Math.round(delayHours * 60 * 60 * 1000);
+
+    if (delayMs > 0) {
+      console.log('[Reply delay] scheduled mode=' + mode + ' hours=' + delayHours.toFixed(2));
+      setTimeout(() => {
+        void sendTelegramReply(chatId, reply).catch((err) => {
+          console.warn('[Reply delay] Telegram send failed:', err);
+        });
+      }, delayMs);
+    } else {
+      await sendTelegramReply(chatId, reply);
+    }
+  }
 
   const nextHistory: Array<{ sender: 'user' | 'hori'; text: string }> = [
     ...history,
@@ -2363,7 +2390,18 @@ app.get('/api/control', (req, res) => {
 
 app.post('/api/control', (req, res) => {
   if (!controlAuthorized(req)) return res.status(401).json({ ok: false, error: 'Unauthorized' });
-  const allowed = ['enabled', 'proactiveEnabled', 'voiceEnabled', 'photoEnabled', 'autoFirst', 'modelMode'];
+  const allowed = [
+    'enabled',
+    'proactiveEnabled',
+    'voiceEnabled',
+    'photoEnabled',
+    'autoFirst',
+    'modelMode',
+    'replyDelayMode',
+    'replyDelayHours',
+    'replyDelayMinHours',
+    'replyDelayMaxHours',
+  ];
   const patch: any = {};
   for (const key of allowed) {
     if (req.body && Object.prototype.hasOwnProperty.call(req.body, key)) patch[key] = req.body[key];
