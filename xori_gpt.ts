@@ -113,7 +113,7 @@ export async function generateXoriLocalReply(
   const fixedLength = config.maxSeqLen;
   if (fixedLength < ids.length) ids = ids.slice(-fixedLength);
 
-  for (let step = 0; step < 160 && ids.length < fixedLength; step++) {
+  for (let step = 0; step < 64 && ids.length < fixedLength; step++) {
     const padded = new BigInt64Array(fixedLength);
     padded.fill(BigInt(config.padId ?? 0));
     ids.forEach((id, index) => {
