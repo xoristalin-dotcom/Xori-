@@ -2785,6 +2785,109 @@ app.post('/api/studio/training/:candidateId/test', async (req, res) => {
   res.json({ ok: true, candidate });
 });
 
+app.post('/api/studio/versions/:candidateId/test', async (req, res) => {
+  const expected = process.env.TRAINING_RUNNER_TOKEN || '';
+  if (expected) {
+    const auth = String(req.headers.authorization || '');
+    const supplied = auth.startsWith('Bearer ') ? auth.slice(7) : String(req.headers['x-training-runner-token'] || '');
+    if (supplied !== expected) return res.status(401).json({ error: 'runner unauthorized' });
+  }
+
+  const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
+  const candidate = (versions.candidates || []).find((x: any) => x.id === req.params.candidateId);
+  if (!candidate) return res.status(404).json({ error: 'candidate not found' });
+  if (!candidate.runner?.adapterId) return res.status(409).json({ error: 'Candidate has no adapterId', candidate });
+
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || '';
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_AUTH_TOKEN || '';
+  const model = String(candidate.runner?.model || process.env.CLOUDFLARE_LORA_MODEL || '@cf/meta/llama-3.2-3b-instruct');
+  if (!accountId || !apiToken) return res.status(503).json({ error: 'Cloudflare credentials are missing on Render.', candidate });
+
+  const cases = Array.isArray(candidate.tests?.cases) && candidate.tests.cases.length
+    ? candidate.tests.cases
+    : [
+        'Привет, Хори. Как прошёл твой день?',
+        'Что ты думаешь о Миямуре?',
+        'Я сегодня много работал, устал.',
+      ];
+
+  candidate.status = 'testing';
+  candidate.message = 'Тестирование существующего Cloudflare LoRA началось.';
+  candidate.updatedAt = new Date().toISOString();
+  saveJson(MODEL_VERSIONS_PATH, versions);
+
+  const results: any[] = [];
+  try {
+    for (const prompt of cases.slice(0, 10)) {
+      const response = await fetch(
+        'https://api.cloudflare.com/client/v4/accounts/' + encodeURIComponent(accountId) + '/ai/run/' + model,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer ' + apiToken,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            messages: [
+              { role: 'system', content: 'Ты Хори Кёко из Horimiya. Отвечай естественно, тепло и кратко на русском языке.' },
+              { role: 'user', content: String(prompt) },
+            ],
+            lora: String(candidate.runner.adapterId),
+            max_tokens: 256,
+            temperature: 0.7,
+          }),
+          signal: AbortSignal.timeout(60000),
+        },
+      );
+      const body = await response.json().catch(() => ({}));
+      const output = body?.result?.response ?? body?.result?.choices?.[0]?.message?.content ?? '';
+      results.push({
+        prompt: String(prompt),
+        ok: response.ok && Boolean(String(output).trim()),
+        http: response.status,
+        response: String(output).slice(0, 2000),
+        error: response.ok ? null : (body?.errors || body?.error || body?.message || 'Cloudflare inference failed'),
+      });
+    }
+
+    const passed = results.filter((x: any) => x.ok).length;
+    candidate.tests = {
+      count: results.length,
+      passed,
+      failed: results.length - passed,
+      status: passed === results.length ? 'passed' : 'failed',
+      checkedAt: new Date().toISOString(),
+      adapterId: candidate.runner.adapterId,
+      model,
+      cases: results,
+    };
+
+    if (passed === results.length) {
+      candidate.status = 'tested';
+      candidate.message = 'Тест успешно пройден. Candidate готов к promotion.';
+    } else {
+      candidate.status = 'test_failed';
+      candidate.message = 'Тест не пройден. Promotion заблокирован.';
+    }
+
+    candidate.updatedAt = new Date().toISOString();
+    saveJson(MODEL_VERSIONS_PATH, versions);
+    return res.status(passed === results.length ? 200 : 502).json({ ok: passed === results.length, candidate });
+  } catch (error) {
+    candidate.status = 'test_failed';
+    candidate.error = error instanceof Error ? error.message : String(error);
+    candidate.tests = {
+      ...(candidate.tests || {}),
+      status: 'failed',
+      checkedAt: new Date().toISOString(),
+      adapterId: candidate.runner.adapterId,
+      model,
+    };
+    saveJson(MODEL_VERSIONS_PATH, versions);
+    return res.status(502).json({ ok: false, error: candidate.error, candidate });
+  }
+});
+
 app.post('/api/studio/versions/:candidateId/promote', (req, res) => {
   const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
   const candidate = (versions.candidates || []).find((x: any) => x.id === req.params.candidateId);
