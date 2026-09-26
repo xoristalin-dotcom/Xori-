@@ -53,12 +53,12 @@ async function handler(req,res){
    withTimeout(fetch(state.botUrl+'/api/autonomy',{headers:process.env.BOT_CONTROL_TOKEN?{'x-hori-control-token':process.env.BOT_CONTROL_TOKEN}:{}})),
    withTimeout(fetch(state.botUrl+'/api/providers',{headers:process.env.BOT_CONTROL_TOKEN?{'x-hori-control-token':process.env.BOT_CONTROL_TOKEN}:{}})),
    withTimeout(fetch(state.hfUrl,{headers:process.env.HF_TOKEN?{Authorization:'Bearer '+process.env.HF_TOKEN}:{}})),
-   Promise.resolve({ok:true,status:200,json:async()=>({panelManaged:false,mode:'connected-render'})}),
-   Promise.resolve({ok:true,status:200,json:async()=>({panelManaged:false,mode:'connected-github'})})
+   withTimeout(fetch(state.renderUrl)),
+   withTimeout(fetch('https://api.github.com/repos/'+encodeURIComponent(state.githubRepo),{headers:{Accept:'application/vnd.github+json','User-Agent':'Hori-Control'}}))
   ]);
   const read=async x=>{if(x.status!=='fulfilled')return {ok:false,error:x.reason?.message||'failed'};try{return {ok:x.value.ok,status:x.value.status,data:await x.value.json()}}catch{return {ok:x.value.ok,status:x.value.status}}};
   const [bot,autonomy,providers,hf,render,github]=await Promise.all(checks.map(read));
-  const result={ok:true,time:new Date().toISOString(),control:{ok:true,auth:!!panelToken()},bot,autonomy,providers,model:{ok:hf.ok,status:hf.status,error:hf.error},render:{ok:true,status:render.status||200,error:null,mode:'connected-render',panelManaged:false},github:{ok:true,status:github.status||200,error:null,mode:'connected-github',panelManaged:false},logs:logs.slice(0,12)};
+  const result={ok:true,time:new Date().toISOString(),control:{ok:true,auth:!!panelToken()},bot,autonomy,providers,model:{ok:hf.ok,status:hf.status,error:hf.error},render:{ok:render.ok,status:render.status||200,error:render.error||null,mode:'public-service-check',data:render.data||null},github:{ok:github.ok,status:github.status||200,error:github.error||null,mode:'public-api-check',data:github.data||null},logs:logs.slice(0,12)};
   log('Dashboard refresh');
   return out(res,result);
  }
