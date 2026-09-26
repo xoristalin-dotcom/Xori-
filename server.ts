@@ -1018,7 +1018,7 @@ async function generateHuggingFaceHoriReply(
     console.log('[HF Xori] reply model=' + String(data?.model || 'unknown'));
     return reply;
   } catch (err) {
-    console.warn('[HF Xori] generation failed; switching to fallback providers:', err);
+    console.warn('[HF Xori] generation failed; own Xori model only — no text fallback:', err);
     return '';
   }
 }
@@ -1125,13 +1125,14 @@ async function generateSpecializedProviderReply(
     }
   }
 
-  console.warn(`[Specialized Router] no external provider available for task=${taskType}`);
+  console.warn(`[Specialized Router] disabled: own Xori model is the only text model.`);
   return '';
 }
 
-function shouldUseSpecializedProvider(taskType: string): boolean {
-  // Normal conversation is ALWAYS Xori AI.
-  return ['coding', 'error', 'math', 'logic', 'search', 'learning'].includes(taskType);
+function shouldUseSpecializedProvider(_taskType: string): boolean {
+  // HARD RULE: every generated text reply uses only the user's own Xori/Hori AI.
+  // Kimi, DeepSeek, GLM, Gemini, Claude and other external text LLMs are disabled.
+  return false;
 }
 
 app.post('/api/web/extract', async (req, res) => {
