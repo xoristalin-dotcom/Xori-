@@ -96,17 +96,3 @@ window.addEventListener('error',e=>{console.error('Hori Control JS error:',e.mes
 window.addEventListener('unhandledrejection',e=>{console.error('Hori Control promise error:',e.reason);const el=$('status');if(el)el.textContent='Ошибка: '+(e.reason?.message||e.reason)});
 console.log('Hori Control frontend boot',new Date().toISOString());
 load();setInterval(refreshLogs,10000);setInterval(()=>{if(tab==='overview')loadDashboard();else if(tab==='bot')loadBotStatus()},7000);
-/* Hori Control mobile navigation: show all 12 tabs at once */
-@media (max-width: 600px){
-  body{padding-bottom:148px!important}
-  #app{display:block!important}
-  aside{position:fixed!important;z-index:50!important;inset:auto 0 0 0!important;width:100%!important;height:140px!important;min-width:0!important;padding:8px!important;background:rgba(10,12,19,.97)!important;border:0!important;border-top:1px solid rgba(255,62,126,.22)!important;backdrop-filter:blur(22px)!important;box-shadow:0 -15px 45px rgba(0,0,0,.4)!important}
-  .brand,.side,.nav-title{display:none!important}
-  nav{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;grid-template-rows:repeat(3,1fr)!important;gap:5px!important;width:100%!important;height:100%!important;overflow:visible!important}
-  nav button{display:flex!important;align-items:center!important;justify-content:center!important;gap:4px!important;min-width:0!important;width:100%!important;height:100%!important;margin:0!important;padding:5px 3px!important;border:1px solid transparent!important;border-radius:10px!important;text-align:center!important;font-size:10px!important;line-height:1.15!important;color:#b98fa4!important;white-space:normal!important;overflow:visible!important}
-  nav button::first-letter{font-size:15px!important}
-  nav button.on{color:#fff!important;background:linear-gradient(135deg,rgba(217,47,130,.25),rgba(139,43,226,.16))!important;border-color:rgba(255,79,154,.28)!important;box-shadow:inset 0 2px #d92f82!important}
-  nav button.on::after{display:none!important}
-  main{padding:15px 11px 20px!important}
-  header{position:sticky!important;top:0!important}
-}
