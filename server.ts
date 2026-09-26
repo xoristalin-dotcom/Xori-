@@ -1078,6 +1078,14 @@ async function generateTextWithConfiguredProvider(systemPrompt: string, userText
       if (!response.ok || data?.success === false) {
         lastError = `HTTP ${response.status}: ${JSON.stringify(data).slice(0, 1200)}`;
         console.error(`[Cloudflare Xori] request failed attempt=${attempt}/3: ${lastError}`);
+
+        // Cloudflare daily allocation is an account-level hard limit.
+        // Retrying a quota-exhaustion 429 cannot restore the quota.
+        if (response.status === 429 && /daily free allocation|account limited|used up.*allocation|quota/i.test(lastError)) {
+          console.error('[Cloudflare Xori] daily allocation exhausted; skipping retries.');
+          return '';
+        }
+
         if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
         continue;
       }
