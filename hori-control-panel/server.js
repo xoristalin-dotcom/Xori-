@@ -54,11 +54,11 @@ async function handler(req,res){
    withTimeout(fetch(state.botUrl+'/api/providers',{headers:process.env.BOT_CONTROL_TOKEN?{'x-hori-control-token':process.env.BOT_CONTROL_TOKEN}:{}})),
    withTimeout(fetch(state.hfUrl,{headers:process.env.HF_TOKEN?{Authorization:'Bearer '+process.env.HF_TOKEN}:{}})),
    withTimeout(fetch(state.renderUrl)),
-   withTimeout((async()=>{const headers={Accept:'application/vnd.github+json','User-Agent':'Hori-Control'};let r=await fetch('https://api.github.com/repos/'+state.githubRepo,{headers});if(r.status===403&&process.env.GITHUB_TOKEN){r=await fetch('https://api.github.com/repos/'+state.githubRepo,{headers:{...headers,Authorization:'Bearer '+process.env.GITHUB_TOKEN}})}return r})())
+   withTimeout(fetch(state.githubUrl,{headers:{'User-Agent':'Hori-Control'}}))
   ]);
   const read=async x=>{if(x.status!=='fulfilled')return {ok:false,error:x.reason?.message||'failed'};try{return {ok:x.value.ok,status:x.value.status,data:await x.value.json()}}catch{return {ok:x.value.ok,status:x.value.status}}};
   const [bot,autonomy,providers,hf,render,github]=await Promise.all(checks.map(read));
-  const githubData=github.data||{};const githubRateLimited=github.status===403&&(githubData?.message||'').toLowerCase().includes('rate limit');const result={ok:true,time:new Date().toISOString(),control:{ok:true,auth:!!panelToken()},bot,autonomy,providers,model:{ok:hf.ok,status:hf.status,error:hf.error},render:{ok:render.ok,status:render.status||200,error:render.error||null,mode:'public-service-check',data:render.data||null},github:{ok:github.ok,status:github.status||200,error:github.error||null,mode:githubRateLimited?'rate-limit':'public-api-check',rateLimited:githubRateLimited,data:githubData},logs:logs.slice(0,12)};
+  const githubData=github.data||{};const result={ok:true,time:new Date().toISOString(),control:{ok:true,auth:!!panelToken()},bot,autonomy,providers,model:{ok:hf.ok,status:hf.status,error:hf.error},render:{ok:render.ok,status:render.status||200,error:render.error||null,mode:'public-service-check',data:render.data||null},github:{ok:github.ok,status:github.status||200,error:github.error||null,mode:'repository-web-check',repository:state.githubRepo,url:state.githubUrl,data:githubData},logs:logs.slice(0,12)};
   log('Dashboard refresh');
   return out(res,result);
  }
