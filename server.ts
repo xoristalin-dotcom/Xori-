@@ -1517,6 +1517,8 @@ async function handleTelegramMessage(chatId: number, text: string, history: any[
   const decision = decideHoriAction(cleanText, reply, memory);
 
   // A natural conversation can occasionally have no response.
+  console.log('[Proactive] decision action=' + decision.action + ' format=' + decision.format + ' reason=' + decision.reason);
+
   if (decision.action === 'ignore') {
     memory.last_chat_id = chatId;
     memory.last_interaction = new Date().toISOString();
@@ -2102,7 +2104,7 @@ async function maybeSendProactiveTelegramMessage() {
   try {
     const chatId = Number(memory.last_chat_id);
     await sendTelegramReply(chatId, finalText);
-    console.log('[Proactive] sent text chat_id=' + String(chatId) + ' format=' + decision.format + ' reason=' + decision.reason);
+    console.log('[Proactive] sent text format=' + decision.format + ' reason=' + decision.reason);
 
     if (decision.sendVoice && control.voiceEnabled) {
       // sendTelegramVoice has a free node-edge-tts fallback, so a configured
