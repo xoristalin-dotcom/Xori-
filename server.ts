@@ -2022,10 +2022,14 @@ async function maybeSendProactiveTelegramMessage() {
   if (lastProactive && now - lastProactive < 6 * 60 * 60 * 1000) return;
   if (!memory.last_chat_id) return;
 
-  if (!memory.next_proactive_at) {
-    // autoFirst means Hori may initiate the conversation after the user has
-    // already opened the chat. Keep a short randomized delay instead of the
-    // old 4-12 hour window, while the 6h anti-spam guard remains in force.
+  const scheduledAt = memory.next_proactive_at ? new Date(memory.next_proactive_at).getTime() : 0;
+  // If "Пишет первой" is enabled, never keep an old 4-12h schedule after
+  // the setting was enabled. Re-arm it to a short 2-10 minute window.
+  const staleAutoFirstSchedule =
+    control.autoFirst &&
+    (!scheduledAt || Number.isNaN(scheduledAt) || scheduledAt - now > 10 * 60 * 1000);
+
+  if (!memory.next_proactive_at || staleAutoFirstSchedule) {
     const delay = control.autoFirst
       ? 2 * 60 * 1000 + Math.random() * (8 * 60 * 1000)
       : 4 * 60 * 60 * 1000 + Math.random() * (8 * 60 * 60 * 1000);
