@@ -2607,14 +2607,17 @@ function buildTrainingDataset() {
 function buildTrainingManifest(datasetSize: number, candidateId: string) {
   return {
     candidateId,
-    baseModel: '@cf/meta/llama-3.2-3b-instruct',
+    baseModel: 'meta-llama/Llama-3.2-3B-Instruct',
+    cloudflareRuntimeModel: '@cf/meta/llama-3.2-3b-instruct',
+    adapterFormat: 'PEFT LoRA',
+    requiresHuggingFaceGatedAccess: true,
     productionLoRA: process.env.CLOUDFLARE_FINETUNE_ID || null,
     datasetSize,
     format: 'chat-sft-jsonl',
     createdAt: new Date().toISOString(),
     lora: { r: 8, alpha: 16, dropout: 0.05, targetModules: ['q_proj', 'k_proj', 'v_proj', 'o_proj'] },
     training: { epochs: 6, batchSize: 1, gradientAccumulation: 16, learningRate: 0.0001, warmupRatio: 0.05, weightDecay: 0.01, maxLength: 1024 },
-    safety: { neverOverwriteProduction: true, candidateOnly: true },
+    safety: { neverOverwriteProduction: true, candidateOnly: true, noAccessBypass: true },
   };
 }
 
