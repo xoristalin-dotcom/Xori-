@@ -40,14 +40,6 @@ const execFileAsync = promisify(execFile);
 
 loadDotEnvFromProjectAndHome();
 
-function requireStudioAdmin(req: any, res: any, next: any) {
-  const expected = String(process.env.STUDIO_ADMIN_TOKEN || '').trim();
-  if (!expected) return res.status(503).json({ error: 'Studio admin token is not configured' });
-  const auth = String(req.headers.authorization || '');
-  if (auth !== 'Bearer ' + expected) return res.status(401).json({ error: 'Studio admin authorization required' });
-  next();
-}
-
 const app = express();
 const PORT = Number.parseInt(process.env.PORT || '3000', 10);
 const OFFLINE_MODE = process.env.OFFLINE_MODE === 'true' || process.env.OFFLINE_MODE === '1';
