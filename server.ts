@@ -2235,15 +2235,45 @@ app.post('/api/xori', async (req, res) => {
   if (!message) return res.status(400).json({ error: 'message is required' });
 
   try {
-    const result = await generateXoriLocalReply(message, history);
-    if (!result?.text) {
-      return res.status(503).json({ error: 'Xori local model is not trained or unavailable' });
+    // Primary path: the hosted Xori fine-tune in Cloudflare Workers AI.
+    const systemPrompt = buildSystemPrompt();
+    const cloudflareReply = await generateTextWithConfiguredProvider(systemPrompt, message, history);
+    if (cloudflareReply) {
+      return res.json({
+        reply: cloudflareReply,
+        model: process.env.CLOUDFLARE_FINETUNE_ID || '@cf/meta/llama-3.2-3b-instruct',
+        provider: 'cloudflare-xori',
+      });
     }
-    return res.json({ reply: result.text, model: result.model, provider: 'xori-local' });
+
+    // Legacy fallback: local ONNX model on Render.
+    const localResult = await generateXoriLocalReply(message, history);
+    if (localResult?.text) {
+      console.warn('[Xori API] Cloudflare unavailable; using legacy local fallback.');
+      return res.json({
+        reply: localResult.text,
+        model: localResult.model,
+        provider: 'xori-local-fallback',
+      });
+    }
+
+    return res.status(503).json({ error: 'Xori Cloudflare model and legacy local fallback are unavailable' });
   } catch (error) {
-    console.error('[Xori Local API] request failed:', error);
+    console.error('[Xori API] request failed:', error);
+    try {
+      const localResult = await generateXoriLocalReply(message, history);
+      if (localResult?.text) {
+        return res.json({
+          reply: localResult.text,
+          model: localResult.model,
+          provider: 'xori-local-fallback',
+        });
+      }
+    } catch (fallbackError) {
+      console.error('[Xori API] legacy fallback failed:', fallbackError);
+    }
     return res.status(502).json({
-      error: 'Xori local model failed',
+      error: 'Xori model failed',
       detail: error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
     });
   }
