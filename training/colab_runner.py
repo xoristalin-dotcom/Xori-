@@ -139,7 +139,7 @@ def run_once(job):
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
-print("Xori Colab GPU runner started")
+print("Xori Colab GPU runner started | build 94c0ad3")
 print("CUDA:", torch.cuda.is_available(), "| GPU:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "NONE")
 
 while True:
