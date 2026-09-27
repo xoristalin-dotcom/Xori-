@@ -76,18 +76,9 @@ def run_once(job):
             fp16=True, gradient_checkpointing=True, logging_steps=1, save_strategy="no",
             report_to="none", remove_unused_columns=False
         )
-        # Transformers 5.x changed some TrainingArguments names/signatures.
-        params = inspect.signature(TrainingArguments.__init__).parameters
-        warmup_ratio = float(tr.get("warmupRatio", 0.05))
-        if "warmup_ratio" in params:
-            training_kwargs["warmup_ratio"] = warmup_ratio
-        elif "warmup_steps" in params:
-            training_kwargs["warmup_steps"] = warmup_ratio
-        if "eval_strategy" in params:
-            training_kwargs["eval_strategy"] = "epoch"
-        elif "evaluation_strategy" in params:
-            training_kwargs["evaluation_strategy"] = "epoch"
-
+        # Keep the runner compatible with Transformers 5.x variants.
+        # Some 5.x builds expose deprecated fields in introspection but reject them at construction.
+        # Warmup/evaluation scheduling are optional here; omitting them is safer than crashing.
         args = TrainingArguments(**training_kwargs)
         trainer = Trainer(model=model, args=args, train_dataset=train_ds, eval_dataset=eval_ds, data_collator=Collator())
         result = trainer.train()
