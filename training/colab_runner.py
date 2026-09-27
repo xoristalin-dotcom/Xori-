@@ -1,4 +1,4 @@
-import os, json, time, tempfile, shutil
+import os, json, time, tempfile, shutil, inspect
 from pathlib import Path
 import requests, torch
 
@@ -53,7 +53,7 @@ def run_once(job):
                 }
 
         q = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True, bnb_4bit_compute_dtype=torch.float16)
-        model = AutoModelForCausalLM.from_pretrained(base, token=hf_token, quantization_config=q, device_map="auto", torch_dtype=torch.float16)
+        model = AutoModelForCausalLM.from_pretrained(base, token=hf_token, quantization_config=q, device_map="auto", dtype=torch.float16)
         model.config.use_cache = False
         model = prepare_model_for_kbit_training(model)
 
@@ -67,15 +67,28 @@ def run_once(job):
 
         tr = manifest.get("training", {})
         out = workdir / "adapter"
-        args = TrainingArguments(
+        training_kwargs = dict(
             output_dir=str(out), num_train_epochs=float(tr.get("epochs", 6)),
             per_device_train_batch_size=int(tr.get("batchSize", 1)),
             gradient_accumulation_steps=int(tr.get("gradientAccumulation", 16)),
             learning_rate=float(tr.get("learningRate", 1e-4)),
-            warmup_ratio=float(tr.get("warmupRatio", 0.05)), weight_decay=float(tr.get("weightDecay", 0.01)),
+            weight_decay=float(tr.get("weightDecay", 0.01)),
             fp16=True, gradient_checkpointing=True, logging_steps=1, save_strategy="no",
-            evaluation_strategy="epoch", report_to="none", remove_unused_columns=False
+            report_to="none", remove_unused_columns=False
         )
+        # Transformers 5.x changed some TrainingArguments names/signatures.
+        params = inspect.signature(TrainingArguments.__init__).parameters
+        warmup_ratio = float(tr.get("warmupRatio", 0.05))
+        if "warmup_ratio" in params:
+            training_kwargs["warmup_ratio"] = warmup_ratio
+        elif "warmup_steps" in params:
+            training_kwargs["warmup_steps"] = warmup_ratio
+        if "eval_strategy" in params:
+            training_kwargs["eval_strategy"] = "epoch"
+        elif "evaluation_strategy" in params:
+            training_kwargs["evaluation_strategy"] = "epoch"
+
+        args = TrainingArguments(**training_kwargs)
         trainer = Trainer(model=model, args=args, train_dataset=train_ds, eval_dataset=eval_ds, data_collator=Collator())
         result = trainer.train()
         trainer.save_model(str(out))
