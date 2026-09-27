@@ -2708,14 +2708,14 @@ async function autoTrainingCycle(reason = 'interval') {
     const queue = loadTrainingQueue();
     const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
     let approved = queue.items.filter((x: any) => x.status === 'approved').length;
-    if (reason === 'studio-manual') {
+    if (reason === 'studio-manual' || reason === 'runner-claim') {
       const added = ensureManualTrainingExamples(queue);
       if (added) addAutoTrainingLog('Добавлены дополнительные обучающие примеры', 'success', { added });
       approved = queue.items.filter((x: any) => x.status === 'approved').length;
     }
     // Manual launch uses the minimum dataset already available (10 examples).
     // Background auto-training keeps the normal 25-example threshold.
-    const requiredExamples = reason === 'studio-manual' ? 10 : AUTO_TRAINING_MIN_EXAMPLES;
+    const requiredExamples = (reason === 'studio-manual' || reason === 'runner-claim') ? 10 : AUTO_TRAINING_MIN_EXAMPLES;
     if (hasActiveAutoTrainingCandidate(versions)) {
       addAutoTrainingLog('Активный Candidate уже существует — ждём завершения', 'warn', { approved });
       autoTrainingLastAction = 'Есть активный Candidate — ждём завершения цикла';
@@ -2859,13 +2859,26 @@ app.post('/api/studio/training/callback', (req, res) => {
   res.json({ ok: true, candidate });
 });
 
-app.get('/api/studio/training/claim', (req, res) => {
+app.get('/api/studio/training/claim', async (req, res) => {
   const expected = process.env.TRAINING_RUNNER_TOKEN || '';
   const auth = String(req.headers.authorization || '');
   if (expected && auth !== 'Bearer ' + expected) return res.status(401).json({ error: 'runner unauthorized' });
 
-  const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
-  const candidate = (versions.candidates || []).find((x: any) => x.status === 'queued');
+  let versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
+  let candidate = (versions.candidates || []).find((x: any) => x.status === 'queued');
+
+  // Render Free has an ephemeral filesystem. If a restart wiped the queue,
+  // the GPU runner bootstraps a fresh candidate itself instead of waiting forever.
+  if (!candidate) {
+    addAutoTrainingLog('GPU-runner запросил задачу, но очередь пуста — восстанавливаем Candidate', 'warn');
+    await autoTrainingCycle('runner-claim').catch((error) => {
+      addAutoTrainingLog('Не удалось автоматически восстановить Candidate', 'error', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+    versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
+    candidate = (versions.candidates || []).find((x: any) => x.status === 'queued');
+  }
   if (!candidate) return res.status(204).end();
 
   candidate.status = 'training';
