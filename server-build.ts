@@ -2667,20 +2667,23 @@ async function autoTrainingCycle(reason = 'interval') {
     const queue = loadTrainingQueue();
     const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
     const approved = queue.items.filter((x: any) => x.status === 'approved').length;
+    // Manual launch uses the minimum dataset already available (10 examples).
+    // Background auto-training keeps the normal 25-example threshold.
+    const requiredExamples = reason === 'studio-manual' ? 10 : AUTO_TRAINING_MIN_EXAMPLES;
     if (hasActiveAutoTrainingCandidate(versions)) {
       addAutoTrainingLog('Активный Candidate уже существует — ждём завершения', 'warn', { approved });
       autoTrainingLastAction = 'Есть активный Candidate — ждём завершения цикла';
       return { ok: true, skipped: true, reason: 'active_candidate', approved };
     }
-    if (approved < AUTO_TRAINING_MIN_EXAMPLES) {
-      addAutoTrainingLog('Недостаточно подтверждённых примеров', 'warn', { approved, required: AUTO_TRAINING_MIN_EXAMPLES });
-      autoTrainingLastAction = 'Накопление датасета: ' + approved + '/' + AUTO_TRAINING_MIN_EXAMPLES;
-      return { ok: true, skipped: true, reason: 'not_enough_examples', approved, required: AUTO_TRAINING_MIN_EXAMPLES, action: autoTrainingLastAction };
+    if (approved < requiredExamples) {
+      addAutoTrainingLog('Недостаточно подтверждённых примеров', 'warn', { approved, required: requiredExamples, mode: reason === 'studio-manual' ? 'manual' : 'automatic' });
+      autoTrainingLastAction = 'Накопление датасета: ' + approved + '/' + requiredExamples;
+      return { ok: true, skipped: true, reason: 'not_enough_examples', approved, required: requiredExamples, action: autoTrainingLastAction };
     }
-    addAutoTrainingLog('Проверка и очистка датасета', 'info');
+    addAutoTrainingLog('Проверка и очистка датасета', 'info', { availableApproved: approved, required: requiredExamples });
     const examples = buildTrainingDataset();
-    if (examples.length < AUTO_TRAINING_MIN_EXAMPLES) {
-      addAutoTrainingLog('После очистки датасет всё ещё меньше порога', 'warn', { datasetSize: examples.length, required: AUTO_TRAINING_MIN_EXAMPLES });
+    if (examples.length < requiredExamples) {
+      addAutoTrainingLog('После очистки датасет всё ещё меньше порога', 'warn', { datasetSize: examples.length, required: requiredExamples });
       autoTrainingLastAction = 'Ожидание качественных уникальных примеров';
       return { ok: true, skipped: true, reason: 'not_enough_dataset', datasetSize: examples.length, action: autoTrainingLastAction };
     }
