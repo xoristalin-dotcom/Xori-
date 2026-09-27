@@ -2846,8 +2846,33 @@ app.post('/api/studio/training/callback', (req, res) => {
   if (candidateId === 'candidate-20260926194920') {
     ensureExistingXoriCandidate(versions);
   }
-  const candidate = (versions.candidates || []).find((x: any) => x.id === candidateId);
-  if (!candidate) return res.status(404).json({ error: 'candidate not found' });
+  let candidate = (versions.candidates || []).find((x: any) => x.id === candidateId);
+  // Render Free can restart between claim/training/callback and lose the candidate
+  // metadata. The runner callback contains enough information to safely reconstruct
+  // the candidate record without creating or replacing a Cloudflare Fine Tune.
+  if (!candidate) {
+    const runner = req.body?.runner && typeof req.body.runner === 'object' ? req.body.runner : {};
+    candidate = {
+      id: candidateId,
+      status: 'queued',
+      datasetSize: Number(runner.datasetSize || 0),
+      manifest: {
+        baseModel: runner.baseModel || 'meta-llama/Llama-3.2-3B-Instruct',
+        candidateId,
+        createdAt: new Date().toISOString(),
+      },
+      createdAt: new Date().toISOString(),
+      message: 'Candidate восстановлен из callback GPU-runner после перезапуска Render.',
+      runner: {},
+    };
+    versions.candidates = Array.isArray(versions.candidates) ? versions.candidates : [];
+    versions.candidates.unshift(candidate);
+    versions.candidates = versions.candidates.slice(0, 20);
+    addAutoTrainingLog('Candidate восстановлен из callback после перезапуска Render', 'warn', {
+      candidateId,
+      status,
+    });
+  }
 
   candidate.status = status;
   candidate.updatedAt = new Date().toISOString();
