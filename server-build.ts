@@ -2726,7 +2726,9 @@ async function autoTrainingCycle(reason = 'interval') {
 }
 app.get('/api/studio/training/automation/logs', (req, res) => {
   const logs = loadAutoTrainingLogs();
-  res.json({ running: autoTrainingBusy, lastRun: autoTrainingLastRun, logs: logs.slice(-200) });
+  const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
+  const active = Array.isArray(versions.candidates) && versions.candidates.some((x:any)=>['queued','training','waiting_for_test_runner','testing'].includes(String(x.status)));
+  res.json({ running: autoTrainingBusy || active, lastRun: autoTrainingLastRun, logs: logs.slice(-200) });
 });
 app.get('/api/studio/training/automation', (req, res) => {
   const queue = loadTrainingQueue();
@@ -2800,6 +2802,7 @@ app.post('/api/studio/training/callback', (req, res) => {
 
   candidate.status = status;
   candidate.updatedAt = new Date().toISOString();
+  addAutoTrainingLog('GPU-runner callback: статус Candidate обновлён', status === 'trained' || status === 'tested' ? 'success' : status === 'runner_error' || status === 'test_failed' ? 'error' : 'info', { candidateId, status });
   if (req.body?.runner) candidate.runner = { ...(candidate.runner || {}), ...req.body.runner };
   if (req.body?.error) candidate.error = String(req.body.error).slice(0, 2000);
   if (req.body?.message) candidate.message = String(req.body.message).slice(0, 2000);
