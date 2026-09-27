@@ -50,6 +50,13 @@ const HF_XORI_URL = process.env.HF_XORI_URL || '';
 const HF_XORI_TOKEN = process.env.HF_XORI_TOKEN || process.env.HF_TOKEN || '';
 const INTERNAL_LEARNING_ENABLED = process.env.INTERNAL_LEARNING_ENABLED !== 'false';
 const WEB_SEARCH_ENABLED = process.env.WEB_SEARCH_ENABLED !== 'false';
+const AUTO_LEARNING_ENABLED = true;
+const AUTO_TRAINING_ENABLED = true;
+const AUTO_TRAINING_MIN_EXAMPLES = Math.max(10, Number(process.env.AUTO_TRAINING_MIN_EXAMPLES || 25));
+const AUTO_TRAINING_INTERVAL_MS = Math.max(60000, Number(process.env.AUTO_TRAINING_INTERVAL_MS || 300000));
+let autoTrainingBusy = false;
+let autoTrainingLastRun: string | null = null;
+let autoTrainingLastAction = 'Ожидание новых подтверждённых примеров';
 const CONTROL_TOKEN = process.env.HORI_CONTROL_TOKEN || '';
 const PROACTIVE_CHAT_ID = Number(process.env.HORI_PROACTIVE_CHAT_ID || 0);
 let internalReplyCounter = 0;
@@ -2629,6 +2636,91 @@ function buildTrainingManifest(datasetSize: number, candidateId: string) {
   };
 }
 
+function hasActiveAutoTrainingCandidate(versions: any): boolean {
+  const active = new Set(['dataset_ready','queued','training','trained','waiting_for_test_runner','testing','tested']);
+  return Array.isArray(versions?.candidates) && versions.candidates.some((x: any) => active.has(String(x.status)));
+}
+function createAutoTrainingCandidate(examples: any[], versions: any) {
+  const candidateId = 'candidate-' + new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+  const datasetPath = path.join(BASE_DIR, 'xori-training-' + candidateId + '.jsonl');
+  const manifestPath = path.join(BASE_DIR, 'xori-training-' + candidateId + '.manifest.json');
+  fs.writeFileSync(datasetPath, examples.map((x) => JSON.stringify(x)).join('\n') + '\n', 'utf8');
+  const manifest = buildTrainingManifest(examples.length, candidateId);
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+  versions.candidates = Array.isArray(versions.candidates) ? versions.candidates : [];
+  const candidate = { id: candidateId, status: 'queued', datasetSize: examples.length, manifest, createdAt: manifest.createdAt, trainingMode: 'auto', queuedAt: new Date().toISOString(), message: 'Автообучение: candidate поставлен в GPU-очередь.' };
+  versions.candidates.unshift(candidate);
+  versions.candidates = versions.candidates.slice(0, 20);
+  saveJson(MODEL_VERSIONS_PATH, versions);
+  return candidate;
+}
+async function autoTrainingCycle(reason = 'interval') {
+  if (autoTrainingBusy) return { ok: true, skipped: true, reason: 'busy' };
+  autoTrainingBusy = true;
+  autoTrainingLastRun = new Date().toISOString();
+  try {
+    const queue = loadTrainingQueue();
+    const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
+    const approved = queue.items.filter((x: any) => x.status === 'approved').length;
+    if (hasActiveAutoTrainingCandidate(versions)) {
+      autoTrainingLastAction = 'Есть активный Candidate — ждём завершения цикла';
+      return { ok: true, skipped: true, reason: 'active_candidate', approved };
+    }
+    if (approved < AUTO_TRAINING_MIN_EXAMPLES) {
+      autoTrainingLastAction = 'Накопление датасета: ' + approved + '/' + AUTO_TRAINING_MIN_EXAMPLES;
+      return { ok: true, skipped: true, reason: 'not_enough_examples', approved, required: AUTO_TRAINING_MIN_EXAMPLES, action: autoTrainingLastAction };
+    }
+    const examples = buildTrainingDataset();
+    if (examples.length < AUTO_TRAINING_MIN_EXAMPLES) {
+      autoTrainingLastAction = 'Ожидание качественных уникальных примеров';
+      return { ok: true, skipped: true, reason: 'not_enough_dataset', datasetSize: examples.length, action: autoTrainingLastAction };
+    }
+    const candidate = createAutoTrainingCandidate(examples, versions);
+    const runnerUrl = process.env.TRAINING_RUNNER_URL || '';
+    if (runnerUrl) {
+      try {
+        const response = await fetch(runnerUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.TRAINING_RUNNER_TOKEN ? { Authorization: 'Bearer ' + process.env.TRAINING_RUNNER_TOKEN } : {}) },
+          body: JSON.stringify({
+            candidateId: candidate.id,
+            manifest: candidate.manifest,
+            datasetUrl: new URL('/api/studio/training/dataset/' + candidate.id, process.env.RENDER_EXTERNAL_URL || 'http://127.0.0.1:' + PORT).toString(),
+            callbackUrl: new URL('/api/studio/training/callback', process.env.RENDER_EXTERNAL_URL || 'http://127.0.0.1:' + PORT).toString()
+          }),
+          signal: AbortSignal.timeout(30000)
+        });
+        if (!response.ok) throw new Error('GPU runner HTTP ' + response.status);
+        const result = await response.json().catch(() => ({}));
+        candidate.runner = result;
+        candidate.status = result.status || 'training';
+        candidate.message = 'Автообучение запущено GPU-runner.';
+        saveJson(MODEL_VERSIONS_PATH, versions);
+        autoTrainingLastAction = 'GPU-runner запущен автоматически';
+      } catch (e) {
+        candidate.message = 'Runner временно недоступен. Candidate оставлен в очереди для /claim.';
+        candidate.error = e instanceof Error ? e.message : String(e);
+        saveJson(MODEL_VERSIONS_PATH, versions);
+        autoTrainingLastAction = 'GPU-runner недоступен — Candidate оставлен в очереди';
+      }
+    } else {
+      autoTrainingLastAction = 'Candidate создан и ожидает GPU runner';
+    }
+    console.log('[AutoTraining] cycle', JSON.stringify({ reason, approved, datasetSize: examples.length, candidateId: candidate.id, action: autoTrainingLastAction }));
+    return { ok: true, candidateId: candidate.id, status: candidate.status, approved, datasetSize: examples.length, action: autoTrainingLastAction };
+  } finally { autoTrainingBusy = false; }
+}
+app.get('/api/studio/training/automation', (req, res) => {
+  const queue = loadTrainingQueue();
+  const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
+  const active = Array.isArray(versions.candidates) ? versions.candidates.find((x: any) => ['dataset_ready','queued','training','trained','waiting_for_test_runner','testing','tested'].includes(String(x.status))) : null;
+  res.json({ enabled: true, autoLearning: true, minExamples: AUTO_TRAINING_MIN_EXAMPLES, intervalMs: AUTO_TRAINING_INTERVAL_MS, approved: queue.items.filter((x:any)=>x.status==='approved').length, pending: queue.items.filter((x:any)=>x.status==='pending').length, lastRun: autoTrainingLastRun, lastAction: autoTrainingLastAction, activeCandidate: active ? {id:active.id,status:active.status,datasetSize:active.datasetSize,message:active.message||''}:null });
+});
+app.post('/api/studio/training/automation/run', async (req, res) => {
+  const result = await autoTrainingCycle('studio-manual');
+  res.status(result?.ok === false ? 500 : 200).json(result);
+});
+
 app.post('/api/studio/training/prepare', (req, res) => {
   const examples = buildTrainingDataset();
   if (examples.length < 10) {
@@ -3234,6 +3326,11 @@ app.post('/telegram/webhook', async (req, res) => {
 });
 
 // Start the autonomy scheduler as soon as the server is initialized.
+function startAutoTrainingScheduler() {
+  void autoTrainingCycle('startup').catch((err) => console.warn('[AutoTraining] startup failed:', err));
+  setInterval(() => void autoTrainingCycle('interval').catch((err) => console.warn('[AutoTraining] interval failed:', err)), AUTO_TRAINING_INTERVAL_MS);
+}
+
 function startAutonomyScheduler() {
   const runAutonomyTick = () => {
     console.log('[Autonomy] tick');
@@ -3252,6 +3349,7 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Hori server listening on port ${PORT}`);
+  startAutoTrainingScheduler();
   if (TELEGRAM_BOT_TOKEN) {
     console.log('Starting Telegram webhook...');
     void startTelegramPolling().catch((err) => {
