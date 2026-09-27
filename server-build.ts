@@ -3450,8 +3450,49 @@ app.post('/telegram/webhook', async (req, res) => {
 });
 
 // Start the autonomy scheduler as soon as the server is initialized.
+async function autoTestTrainedCandidates() {
+  const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
+  const candidates = Array.isArray(versions.candidates) ? versions.candidates : [];
+  for (const candidate of candidates) {
+    if (candidate.status !== 'trained' || !candidate.runner?.adapterId) continue;
+    try {
+      addAutoTrainingLog('Автотест: найден обученный Candidate, запускаем реальный Cloudflare LoRA test', 'info', {
+        candidateId: candidate.id,
+        adapterId: candidate.runner.adapterId,
+      });
+      const response = await fetch('http://127.0.0.1:' + PORT + '/api/studio/versions/' + encodeURIComponent(candidate.id) + '/test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(process.env.TRAINING_RUNNER_TOKEN ? { Authorization: 'Bearer ' + process.env.TRAINING_RUNNER_TOKEN } : {}),
+        },
+        body: '{}',
+        signal: AbortSignal.timeout(180000),
+      });
+      const body = await response.json().catch(() => ({}));
+      addAutoTrainingLog(
+        response.ok ? 'Автотест Candidate завершён' : 'Автотест Candidate завершился ошибкой',
+        response.ok ? 'success' : 'error',
+        {
+          candidateId: candidate.id,
+          http: response.status,
+          status: body?.candidate?.status,
+          passed: body?.candidate?.tests?.passed,
+          failed: body?.candidate?.tests?.failed,
+        },
+      );
+    } catch (error) {
+      addAutoTrainingLog('Автотест Candidate не удалось выполнить', 'error', {
+        candidateId: candidate.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+}
+
 function startAutoTrainingScheduler() {
   void autoTrainingCycle('startup').catch((err) => console.warn('[AutoTraining] startup failed:', err));
+  setTimeout(() => void autoTestTrainedCandidates().catch((err) => console.warn('[AutoTraining] candidate test failed:', err)), 5000);
   setInterval(() => void autoTrainingCycle('interval').catch((err) => console.warn('[AutoTraining] interval failed:', err)), AUTO_TRAINING_INTERVAL_MS);
 }
 
