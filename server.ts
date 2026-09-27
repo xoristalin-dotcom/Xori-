@@ -49,6 +49,13 @@ const POLLINATIONS_API_KEY = process.env.POLLINATIONS_API_KEY || '';
 const HF_XORI_URL = process.env.HF_XORI_URL || '';
 const HF_XORI_TOKEN = process.env.HF_XORI_TOKEN || process.env.HF_TOKEN || '';
 const INTERNAL_LEARNING_ENABLED = process.env.INTERNAL_LEARNING_ENABLED !== 'false';
+const AUTO_LEARNING_ENABLED = process.env.AUTO_LEARNING_ENABLED !== 'false';
+const AUTO_TRAINING_ENABLED = process.env.AUTO_TRAINING_ENABLED !== 'false';
+const AUTO_TRAINING_MIN_EXAMPLES = Math.max(10, Number(process.env.AUTO_TRAINING_MIN_EXAMPLES || 25));
+const AUTO_TRAINING_INTERVAL_MS = Math.max(60_000, Number(process.env.AUTO_TRAINING_INTERVAL_MS || 300_000));
+let autoTrainingBusy = false;
+let autoTrainingLastRun: string | null = null;
+let autoTrainingLastAction = 'Ожидание новых подтверждённых примеров';
 const WEB_SEARCH_ENABLED = process.env.WEB_SEARCH_ENABLED !== 'false';
 const CONTROL_TOKEN = process.env.HORI_CONTROL_TOKEN || '';
 const PROACTIVE_CHAT_ID = Number(process.env.HORI_PROACTIVE_CHAT_ID || 0);
@@ -173,6 +180,14 @@ function findLearnedExample(text: string): { user: string; assistant: string } |
   }
 
   return best?.example || null;
+}
+
+function isCleanAutoLearningSignal(user: string, assistant: string): boolean {
+  const u = String(user || '').trim();
+  const a = String(assistant || '').trim();
+  if (u.length < 3 || a.length < 20 || a.length > 5000) return false;
+  const bad = ['Все API-провайдеры недоступны', 'Cloudflare', 'HTTP 500', 'API недоступен', 'Internal server error'];
+  return !bad.some((x) => a.toLowerCase().includes(x.toLowerCase()));
 }
 
 function saveTrainingExample(user: string, assistant: string, approved = false, correction = ''): void {
@@ -2631,19 +2646,18 @@ function buildTrainingManifest(datasetSize: number, candidateId: string) {
   };
 }
 
-app.post('/api/studio/training/prepare', (req, res) => {
-  const examples = buildTrainingDataset();
-  if (examples.length < 10) {
-    return res.status(400).json({ ok: false, error: 'Нужно минимум 10 подтверждённых примеров', count: examples.length });
-  }
+function hasActiveAutoTrainingCandidate(versions: any): boolean {
+  const active = new Set(['dataset_ready', 'queued', 'training', 'trained', 'waiting_for_test_runner', 'testing', 'tested']);
+  return Array.isArray(versions?.candidates) && versions.candidates.some((x: any) => active.has(String(x.status)));
+}
+
+function createTrainingCandidate(examples: any[], versions: any) {
   const candidateId = 'candidate-' + new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
   const datasetPath = path.join(BASE_DIR, 'xori-training-' + candidateId + '.jsonl');
   const manifestPath = path.join(BASE_DIR, 'xori-training-' + candidateId + '.manifest.json');
   fs.writeFileSync(datasetPath, examples.map((x) => JSON.stringify(x)).join('\n') + '\n', 'utf8');
   const manifest = buildTrainingManifest(examples.length, candidateId);
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
-
-  const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
   versions.candidates = Array.isArray(versions.candidates) ? versions.candidates : [];
   versions.candidates.unshift({
     id: candidateId,
@@ -2651,10 +2665,112 @@ app.post('/api/studio/training/prepare', (req, res) => {
     datasetSize: examples.length,
     manifest,
     createdAt: manifest.createdAt,
+    trainingMode: 'auto',
   });
   versions.candidates = versions.candidates.slice(0, 20);
   saveJson(MODEL_VERSIONS_PATH, versions);
-  res.json({ ok: true, candidateId, datasetSize: examples.length, manifest, download: '/api/studio/training/dataset/' + candidateId });
+  return versions.candidates[0];
+}
+
+async function autoTrainingCycle(reason = 'scheduler') {
+  if (!AUTO_TRAINING_ENABLED || autoTrainingBusy) return { ok: true, skipped: true, reason: 'disabled_or_busy' };
+  autoTrainingBusy = true;
+  autoTrainingLastRun = new Date().toISOString();
+  try {
+    const queue = loadTrainingQueue();
+    const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
+    const approved = queue.items.filter((x: any) => x.status === 'approved').length;
+    if (hasActiveAutoTrainingCandidate(versions)) {
+      autoTrainingLastAction = 'Есть активный candidate — ждём завершения текущего цикла';
+      return { ok: true, skipped: true, reason: 'active_candidate', approved };
+    }
+    if (approved < AUTO_TRAINING_MIN_EXAMPLES) {
+      autoTrainingLastAction = 'Накопление датасета';
+      return { ok: true, skipped: true, reason: 'not_enough_examples', approved, required: AUTO_TRAINING_MIN_EXAMPLES };
+    }
+
+    const examples = buildTrainingDataset();
+    if (examples.length < AUTO_TRAINING_MIN_EXAMPLES) {
+      autoTrainingLastAction = 'Ожидание качественных уникальных примеров';
+      return { ok: true, skipped: true, reason: 'not_enough_dataset', datasetSize: examples.length };
+    }
+
+    const candidate = createTrainingCandidate(examples, versions);
+    candidate.status = 'queued';
+    candidate.queuedAt = new Date().toISOString();
+    candidate.message = 'Автообучение: candidate автоматически поставлен в GPU-очередь.';
+    saveJson(MODEL_VERSIONS_PATH, versions);
+    autoTrainingLastAction = 'Candidate создан и поставлен в GPU-очередь';
+
+    const runnerUrl = process.env.TRAINING_RUNNER_URL || '';
+    if (runnerUrl) {
+      try {
+        const response = await fetch(runnerUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(process.env.TRAINING_RUNNER_TOKEN ? { Authorization: 'Bearer ' + process.env.TRAINING_RUNNER_TOKEN } : {}),
+          },
+          body: JSON.stringify({
+            candidateId: candidate.id,
+            manifest: candidate.manifest,
+            datasetUrl: new URL('/api/studio/training/dataset/' + candidate.id, process.env.RENDER_EXTERNAL_URL || 'http://127.0.0.1:' + PORT).toString(),
+            callbackUrl: new URL('/api/studio/training/callback', process.env.RENDER_EXTERNAL_URL || 'http://127.0.0.1:' + PORT).toString(),
+          }),
+          signal: AbortSignal.timeout(30000),
+        });
+        if (!response.ok) throw new Error('GPU runner HTTP ' + response.status);
+        const result = await response.json().catch(() => ({}));
+        candidate.runner = result;
+        candidate.status = result.status || 'training';
+        candidate.message = 'Автообучение запущено GPU-runner.';
+        saveJson(MODEL_VERSIONS_PATH, versions);
+        autoTrainingLastAction = 'GPU-runner запущен автоматически';
+      } catch (error) {
+        candidate.status = 'queued';
+        candidate.error = error instanceof Error ? error.message : String(error);
+        candidate.message = 'Runner временно недоступен. Candidate останется в очереди для /claim.';
+        saveJson(MODEL_VERSIONS_PATH, versions);
+        autoTrainingLastAction = 'GPU-runner недоступен — candidate оставлен в очереди';
+      }
+    }
+    console.log('[AutoTraining] cycle', JSON.stringify({ reason, approved, datasetSize: examples.length, candidateId: candidate.id, action: autoTrainingLastAction }));
+    return { ok: true, candidateId: candidate.id, status: candidate.status, approved, datasetSize: examples.length, action: autoTrainingLastAction };
+  } finally {
+    autoTrainingBusy = false;
+  }
+}
+
+app.post('/api/studio/training/prepare', (req, res) => {
+  const examples = buildTrainingDataset();
+  if (examples.length < 10) {
+    return res.status(400).json({ ok: false, error: 'Нужно минимум 10 подтверждённых примеров', count: examples.length });
+  }
+  const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
+  const candidate = createTrainingCandidate(examples, versions);
+  res.json({ ok: true, candidateId: candidate.id, datasetSize: examples.length, manifest: candidate.manifest, download: '/api/studio/training/dataset/' + candidate.id });
+});
+
+app.get('/api/studio/training/automation', (req, res) => {
+  const queue = loadTrainingQueue();
+  const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
+  const active = Array.isArray(versions.candidates) ? versions.candidates.find((x: any) => ['dataset_ready','queued','training','trained','waiting_for_test_runner','testing','tested'].includes(String(x.status))) : null;
+  res.json({
+    enabled: AUTO_TRAINING_ENABLED,
+    autoLearning: AUTO_LEARNING_ENABLED,
+    minExamples: AUTO_TRAINING_MIN_EXAMPLES,
+    intervalMs: AUTO_TRAINING_INTERVAL_MS,
+    approved: queue.items.filter((x: any) => x.status === 'approved').length,
+    pending: queue.items.filter((x: any) => x.status === 'pending').length,
+    lastRun: autoTrainingLastRun,
+    lastAction: autoTrainingLastAction,
+    activeCandidate: active ? { id: active.id, status: active.status, datasetSize: active.datasetSize, message: active.message || '' } : null
+  });
+});
+
+app.post('/api/studio/training/automation/run', async (req, res) => {
+  const result = await autoTrainingCycle('studio-manual');
+  res.status(result?.ok === false ? 500 : 200).json(result);
 });
 
 app.get('/api/studio/training/dataset/:candidateId', (req, res) => {
@@ -3116,7 +3232,7 @@ app.post('/api/chat', async (req, res) => {
     });
   }
 
-  saveTrainingExample(cleanText, reply, false);
+  saveTrainingExample(cleanText, reply, AUTO_LEARNING_ENABLED && isCleanAutoLearningSignal(cleanText, reply));
 
   // Update memory state
   memory.emotion = emotion;
@@ -3159,6 +3275,13 @@ app.post('/telegram/webhook', async (req, res) => {
 });
 
 // Start the autonomy scheduler as soon as the server is initialized.
+function startAutoTrainingScheduler() {
+  void autoTrainingCycle('startup').catch((err) => console.warn('[AutoTraining] startup failed:', err));
+  setInterval(() => {
+    void autoTrainingCycle('interval').catch((err) => console.warn('[AutoTraining] interval failed:', err));
+  }, AUTO_TRAINING_INTERVAL_MS);
+}
+
 function startAutonomyScheduler() {
   const runAutonomyTick = () => {
     console.log('[Autonomy] tick');
@@ -3177,6 +3300,7 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Hori server listening on port ${PORT}`);
+  startAutoTrainingScheduler();
   if (TELEGRAM_BOT_TOKEN) {
     console.log('Starting Telegram webhook...');
     void startTelegramPolling().catch((err) => {
