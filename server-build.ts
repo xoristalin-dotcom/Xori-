@@ -54,9 +54,13 @@ const AUTO_LEARNING_ENABLED = true;
 const AUTO_TRAINING_ENABLED = true;
 const AUTO_TRAINING_MIN_EXAMPLES = Math.max(10, Number(process.env.AUTO_TRAINING_MIN_EXAMPLES || 25));
 const AUTO_TRAINING_INTERVAL_MS = Math.max(60000, Number(process.env.AUTO_TRAINING_INTERVAL_MS || 300000));
+const AUTO_TRAINING_LOG_PATH = path.join(process.cwd(), 'xori_auto_training_logs.json');
 let autoTrainingBusy = false;
 let autoTrainingLastRun: string | null = null;
 let autoTrainingLastAction = 'Ожидание новых подтверждённых примеров';
+function loadAutoTrainingLogs(): any[] { return loadJson<any[]>(AUTO_TRAINING_LOG_PATH, []); }
+function addAutoTrainingLog(message: string, level: 'info'|'success'|'warn'|'error' = 'info', data: any = null) { const logs = loadAutoTrainingLogs(); logs.push({ time: new Date().toISOString(), level, message, data }); saveJson(AUTO_TRAINING_LOG_PATH, logs.slice(-300)); console.log('[AutoTraining]', message, data ? JSON.stringify(data) : ''); }
+
 const CONTROL_TOKEN = process.env.HORI_CONTROL_TOKEN || '';
 const PROACTIVE_CHAT_ID = Number(process.env.HORI_PROACTIVE_CHAT_ID || 0);
 let internalReplyCounter = 0;
@@ -2655,30 +2659,37 @@ function createAutoTrainingCandidate(examples: any[], versions: any) {
   return candidate;
 }
 async function autoTrainingCycle(reason = 'interval') {
-  if (autoTrainingBusy) return { ok: true, skipped: true, reason: 'busy' };
+  if (autoTrainingBusy) { addAutoTrainingLog('Цикл уже выполняется — новый запуск пропущен', 'warn', { reason }); return { ok: true, skipped: true, reason: 'busy' }; }
   autoTrainingBusy = true;
   autoTrainingLastRun = new Date().toISOString();
+  addAutoTrainingLog('▶ Запуск цикла автообучения', 'info', { reason });
   try {
     const queue = loadTrainingQueue();
     const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
     const approved = queue.items.filter((x: any) => x.status === 'approved').length;
     if (hasActiveAutoTrainingCandidate(versions)) {
+      addAutoTrainingLog('Активный Candidate уже существует — ждём завершения', 'warn', { approved });
       autoTrainingLastAction = 'Есть активный Candidate — ждём завершения цикла';
       return { ok: true, skipped: true, reason: 'active_candidate', approved };
     }
     if (approved < AUTO_TRAINING_MIN_EXAMPLES) {
+      addAutoTrainingLog('Недостаточно подтверждённых примеров', 'warn', { approved, required: AUTO_TRAINING_MIN_EXAMPLES });
       autoTrainingLastAction = 'Накопление датасета: ' + approved + '/' + AUTO_TRAINING_MIN_EXAMPLES;
       return { ok: true, skipped: true, reason: 'not_enough_examples', approved, required: AUTO_TRAINING_MIN_EXAMPLES, action: autoTrainingLastAction };
     }
+    addAutoTrainingLog('Проверка и очистка датасета', 'info');
     const examples = buildTrainingDataset();
     if (examples.length < AUTO_TRAINING_MIN_EXAMPLES) {
+      addAutoTrainingLog('После очистки датасет всё ещё меньше порога', 'warn', { datasetSize: examples.length, required: AUTO_TRAINING_MIN_EXAMPLES });
       autoTrainingLastAction = 'Ожидание качественных уникальных примеров';
       return { ok: true, skipped: true, reason: 'not_enough_dataset', datasetSize: examples.length, action: autoTrainingLastAction };
     }
     const candidate = createAutoTrainingCandidate(examples, versions);
+    addAutoTrainingLog('Candidate создан и поставлен в очередь', 'success', { candidateId: candidate.id, datasetSize: examples.length });
     const runnerUrl = process.env.TRAINING_RUNNER_URL || '';
     if (runnerUrl) {
       try {
+        addAutoTrainingLog('Отправка Candidate в GPU-runner', 'info', { candidateId: candidate.id, runnerUrl });
         const response = await fetch(runnerUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...(process.env.TRAINING_RUNNER_TOKEN ? { Authorization: 'Bearer ' + process.env.TRAINING_RUNNER_TOKEN } : {}) },
@@ -2695,21 +2706,28 @@ async function autoTrainingCycle(reason = 'interval') {
         candidate.runner = result;
         candidate.status = result.status || 'training';
         candidate.message = 'Автообучение запущено GPU-runner.';
+        addAutoTrainingLog('GPU-runner подтвердил запуск обучения', 'success', { candidateId: candidate.id, status: candidate.status });
         saveJson(MODEL_VERSIONS_PATH, versions);
         autoTrainingLastAction = 'GPU-runner запущен автоматически';
       } catch (e) {
         candidate.message = 'Runner временно недоступен. Candidate оставлен в очереди для /claim.';
         candidate.error = e instanceof Error ? e.message : String(e);
+        addAutoTrainingLog('GPU-runner не запущен', 'error', { candidateId: candidate.id, error: candidate.error });
         saveJson(MODEL_VERSIONS_PATH, versions);
         autoTrainingLastAction = 'GPU-runner недоступен — Candidate оставлен в очереди';
       }
     } else {
       autoTrainingLastAction = 'Candidate создан и ожидает GPU runner';
+      addAutoTrainingLog('GPU-runner URL не настроен — Candidate ждёт запуска', 'warn', { candidateId: candidate.id });
     }
     console.log('[AutoTraining] cycle', JSON.stringify({ reason, approved, datasetSize: examples.length, candidateId: candidate.id, action: autoTrainingLastAction }));
     return { ok: true, candidateId: candidate.id, status: candidate.status, approved, datasetSize: examples.length, action: autoTrainingLastAction };
   } finally { autoTrainingBusy = false; }
 }
+app.get('/api/studio/training/automation/logs', (req, res) => {
+  const logs = loadAutoTrainingLogs();
+  res.json({ running: autoTrainingBusy, lastRun: autoTrainingLastRun, logs: logs.slice(-200) });
+});
 app.get('/api/studio/training/automation', (req, res) => {
   const queue = loadTrainingQueue();
   const versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
