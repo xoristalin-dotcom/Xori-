@@ -33,8 +33,25 @@ def run_once(job):
             tokenizer.pad_token = tokenizer.eos_token
 
         def encode(row):
-            ids = tokenizer.apply_chat_template(row["messages"], tokenize=True, add_generation_prompt=False)
-            ids = ids.tolist() if hasattr(ids, "tolist") else ids
+            encoded = tokenizer.apply_chat_template(
+                row["messages"],
+                tokenize=True,
+                add_generation_prompt=False,
+            )
+            # Transformers 5.x may return a BatchEncoding/dict here instead of a raw list.
+            # Normalize all supported return shapes to one flat list of token ids.
+            if isinstance(encoded, dict):
+                ids = encoded.get("input_ids")
+            elif hasattr(encoded, "input_ids"):
+                ids = encoded.input_ids
+            else:
+                ids = encoded
+            if hasattr(ids, "tolist"):
+                ids = ids.tolist()
+            if isinstance(ids, list) and ids and isinstance(ids[0], list):
+                ids = ids[0]
+            if not isinstance(ids, list) or not all(isinstance(x, int) for x in ids):
+                raise TypeError(f"Unexpected chat-template token output: {type(encoded).__name__} / {type(ids).__name__}")
             return {"input_ids": ids, "attention_mask": [1] * len(ids), "labels": ids}
 
         data = [encode(x) for x in rows]
@@ -139,7 +156,7 @@ def run_once(job):
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
-print("Xori Colab GPU runner started | build 94c0ad3")
+print("Xori Colab GPU runner started | build 94c0ad4")
 print("CUDA:", torch.cuda.is_available(), "| GPU:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "NONE")
 
 while True:
