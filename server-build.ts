@@ -2867,6 +2867,22 @@ app.get('/api/studio/training/claim', async (req, res) => {
   let versions = loadJson<any>(MODEL_VERSIONS_PATH, { production: 'cloudflare-hori-lora', candidates: [] });
   let candidate = (versions.candidates || []).find((x: any) => x.status === 'queued');
 
+  // If the runner crashed after claiming a job, allow a stale training job to be reclaimed.
+  // A fresh runner is the only consumer in this pull-based setup.
+  if (!candidate) {
+    const now = Date.now();
+    candidate = (versions.candidates || []).find((x: any) => {
+      if (x.status !== 'training' || !x.startedAt) return false;
+      const age = now - Date.parse(String(x.startedAt));
+      return Number.isFinite(age) && age > 2 * 60 * 1000;
+    });
+    if (candidate) {
+      addAutoTrainingLog('Восстанавливаем зависший Candidate после сбоя GPU-runner', 'warn', {
+        candidateId: candidate.id,
+      });
+    }
+  }
+
   // Render Free has an ephemeral filesystem. If a restart wiped the queue,
   // the GPU runner bootstraps a fresh candidate itself instead of waiting forever.
   if (!candidate) {
