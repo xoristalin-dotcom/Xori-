@@ -82,6 +82,8 @@ function loadPersistedProductionLoRA() {
 
 app.use(express.json({ limit: '10mb' }));
 
+// Lightweight liveness endpoint for Render HTTP health checks.\n// Keep this dependency-free so Render can probe it during startup/restarts.\napp.get('/health', (_req, res) => {\n  res.status(200).json({ ok: true, service: 'xori-training-api', uptime: Math.floor(process.uptime()) });\n});
+
 // CORS for the public Xori AI Studio frontend.
 app.use((req, res, next) => {
   // Studio uses fetch() without credentials, so wildcard CORS is safe here and
